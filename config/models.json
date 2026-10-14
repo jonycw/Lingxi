@@ -1,0 +1,28 @@
+{
+  "models": [
+    {
+      "id": "lingxi-fast",
+      "upstream": "gpt-4o-mini",
+      "owned_by": "lingxi",
+      "input_micros_per_million": 1000000,
+      "output_micros_per_million": 4000000,
+      "enabled": true
+    },
+    {
+      "id": "lingxi-pro",
+      "upstream": "gpt-4o",
+      "owned_by": "lingxi",
+      "input_micros_per_million": 10000000,
+      "output_micros_per_million": 30000000,
+      "enabled": true
+    },
+    {
+      "id": "lingxi-reason",
+      "upstream": "o4-mini",
+      "owned_by": "lingxi",
+      "input_micros_per_million": 5000000,
+      "output_micros_per_million": 20000000,
+      "enabled": true
+    }
+  ]
+}
