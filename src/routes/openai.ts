@@ -111,6 +111,47 @@ export function registerOpenAiRoutes(app: LingxiApp, deps: AppDeps): void {
     });
   });
 
+  app.get('/v1/me', async (c) => {
+    const auth = c.get('auth');
+    if (!auth) {
+      throw new ApiError(401, 'Invalid API key', 'authentication_error', 'invalid_api_key');
+    }
+    const customer = (await deps.repo.getCustomer(deps.db, auth.customer.id)) ?? auth.customer;
+    const key = (await deps.repo.getKeyById(deps.db, auth.apiKey.id)) ?? auth.apiKey;
+    const period = periodKeyFor(key.quotaPeriod, deps.now());
+    const quota = await deps.repo.getQuota(deps.db, key.id, period);
+    return c.json({
+      object: 'lingxi.account',
+      customer: {
+        id: customer.id,
+        name: customer.name,
+        status: customer.status,
+        balance_micros: customer.balanceMicros,
+        balance_credits: formatCredits(customer.balanceMicros),
+      },
+      api_key: {
+        id: key.id,
+        name: key.name,
+        prefix: key.keyPrefix,
+        status: key.status,
+        rate_limit_rpm: key.rateLimitRpm,
+        rate_limit_tpm: key.rateLimitTpm,
+        soft_quota_tokens: key.softQuotaTokens,
+        hard_quota_tokens: key.hardQuotaTokens,
+        quota_period: key.quotaPeriod,
+      },
+      quota: {
+        period: key.quotaPeriod,
+        period_key: period,
+        total_tokens: quota.totalTokens,
+        requests: quota.requests,
+        cost_micros: quota.costMicros,
+        soft_quota_tokens: key.softQuotaTokens,
+        hard_quota_tokens: key.hardQuotaTokens,
+      },
+    });
+  });
+
   app.get('/v1/usage', async (c) => {
     const auth = c.get('auth');
     if (!auth) {

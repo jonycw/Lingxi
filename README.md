@@ -6,7 +6,8 @@ Lingxi（灵犀）是一个私有的 OpenAI 兼容 API 网关。你在一台自�
 
 ## 功能
 
-- OpenAI 兼容接口：`POST /v1/chat/completions`（普通 JSON 与 SSE 流式）、`GET /v1/models`、`GET /v1/usage`
+- OpenAI 兼容接口：`POST /v1/chat/completions`（普通 JSON 与 SSE 流式）、`GET /v1/models`、`GET /v1/me`、`GET /v1/usage`
+- 网页管理台 `/admin/ui` 与客户对话台 `/console`，由本进程直接提供静态文件
 - 多租户：管理员签发 / 吊销客户 API Key，客户请求使用 `Authorization: Bearer`
 - 计费 MVP：按 token 扣余额、每分钟请求/Token 速率限制、软配额（告警）与硬配额（拒绝）
 - 用量流水、余额账本、模型价格覆盖
@@ -117,6 +118,24 @@ POSTGRES_PASSWORD=change-me docker compose --profile postgres up
 
 然后把 `.env` 中的 `DATABASE_URL` 设为 `postgres://lingxi:change-me@postgres:5432/lingxi` 并重启 Lingxi。应用启动时会执行同一套建表语句。
 
+## 网页控制台
+
+`npm run dev` 之后用浏览器打开：
+
+| 页面 | 地址 |
+| --- | --- |
+| 首页 | http://127.0.0.1:8787/ |
+| 管理台 | http://127.0.0.1:8787/admin/ui |
+| 客户对话台 | http://127.0.0.1:8787/console |
+
+管理台别名是 `/console/admin`，对话台别名是 `/app`。
+
+管理台用 `.env` 里的 `ADMIN_TOKEN` 登录。令牌只写入当前标签页的 `sessionStorage`，关闭标签即清除，不会写进仓库。登录后可以新建客户、给余额充值、签发或吊销 `lx_` 密钥、修改模型价格、查看用量汇总。完整密钥只在签发成功的当次显示，请立即复制。
+
+客户把拿到的 `lx_` 密钥粘贴到对话台。对话台用 `GET /v1/models` 填充模型列表，用 `POST /v1/chat/completions` 发消息，账户页显示 `GET /v1/me` 的余额与配额，以及 `GET /v1/usage` 的最近调用。`UPSTREAM_API_KEY` 留空时是模拟模式，回复里会包含「灵犀模拟」。
+
+页面、样式和图标都从 `public/` 由同一进程提供，不请求外部 CDN。浏览器访问 `/` 且 `Accept` 包含 `text/html` 时返回首页；`curl` 或不带该头时仍返回 JSON 索引。右上角可切换中文 / English 和浅色 / 深色。
+
 ## 配置
 
 复制 `.env.example` 为 `.env`。已存在于进程环境中的变量不会被 `.env` 覆盖。
@@ -148,7 +167,7 @@ POSTGRES_PASSWORD=change-me docker compose --profile postgres up
 
 ## 客户接口
 
-除 `/health`、`/healthz` 和 `/` 以外，`/v1/*` 都需要客户密钥：
+`/health`、`/healthz`、`/`、管理台页面和 `/console` 可直接打开。`/v1/*` 需要客户密钥：
 
 ```http
 Authorization: Bearer lx_...
@@ -164,6 +183,7 @@ Authorization: Bearer lx_...
 | --- | --- | --- |
 | `GET` | `/health` | 进程、数据库、上游模式（`mock` 或 `proxy`） |
 | `GET` | `/v1/models` | 当前启用的公开模型。不返回上游真实模型名 |
+| `GET` | `/v1/me` | 当前密钥对应的客户余额、密钥前缀和本周期配额。不返回完整密钥 |
 | `POST` | `/v1/chat/completions` | 聊天补全。`stream: true` 为 SSE |
 | `GET` | `/v1/usage` | 当前密钥的余额、配额和最近用量 |
 
@@ -303,8 +323,10 @@ src/billing.ts         准入：余额、配额、速率
 src/billingCost.ts     整数计价
 src/upstream.ts        上游代理与本地模拟
 src/payments.ts        HMAC 支付回调
+src/routes/ui.ts       首页、管理台、对话台
 src/db/                SQLite、Postgres 和共用 SQL
 config/models.json     公开模型名到上游模型名
+public/                控制台页面、样式和脚本
 ```
 
 ## English
@@ -337,6 +359,14 @@ curl -s http://127.0.0.1:8787/health
 Leave `UPSTREAM_API_KEY` empty to boot in mock mode. Mock completions are still authenticated, rate limited, and billed. Set the key and `UPSTREAM_MOCK=false` to proxy. `UPSTREAM_BASE_URL` must include the `/v1` prefix (`https://api.openai.com/v1` is the example). Point it at whatever OpenAI-compatible base URL your Cursor or other upstream account uses, and map public model ids in `config/models.json`.
 
 Change `ADMIN_TOKEN` before exposing the port. Production mode refuses the example token.
+
+### Web consoles
+
+- Home: http://127.0.0.1:8787/
+- Admin: http://127.0.0.1:8787/admin/ui (`ADMIN_TOKEN`, kept in `sessionStorage` for this tab only)
+- Customer chat: http://127.0.0.1:8787/console (paste an `lx_` key)
+
+Aliases: `/console/admin` and `/app`. The same Node process serves `public/` with no CDN. `GET /` returns HTML when `Accept` includes `text/html`, and a JSON index otherwise. `GET /v1/me` returns the current key's balance and quota without the secret. With an empty `UPSTREAM_API_KEY`, the chat console talks to the mock upstream.
 
 ### Issue a key and call the API
 

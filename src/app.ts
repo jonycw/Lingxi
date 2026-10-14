@@ -14,6 +14,7 @@ import { createModelCatalog, type ModelCatalog } from './models.js';
 import { registerPaymentWebhook } from './payments.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerOpenAiRoutes } from './routes/openai.js';
+import { registerConsole } from './routes/ui.js';
 import { createUpstream, type FetchLike, type Upstream } from './upstream.js';
 import type { AppDeps, AppVariables, LingxiApp } from './appTypes.js';
 import { adminAuth, customerAuth } from './auth.js';
@@ -58,15 +59,6 @@ function registerHealth(app: LingxiApp, deps: AppDeps): void {
   };
   app.get('/health', handler);
   app.get('/healthz', handler);
-  app.get('/', (c) =>
-    c.json({
-      service: SERVICE_NAME,
-      version: VERSION,
-      health: '/health',
-      openai: '/v1/chat/completions',
-      models: '/v1/models',
-    }),
-  );
 }
 
 export function createApp(options: CreateAppOptions): LingxiApp {
@@ -205,6 +197,7 @@ export function createApp(options: CreateAppOptions): LingxiApp {
   );
 
   registerHealth(app, deps);
+  registerConsole(app);
   registerPaymentWebhook(app, deps);
   app.use('/admin/*', adminAuth(deps));
   registerAdminRoutes(app, deps);

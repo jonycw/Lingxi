@@ -13,6 +13,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY config ./config
+COPY public ./public
 COPY README.md ./README.md
 RUN mkdir -p /data && chown -R node:node /app /data
 USER node
