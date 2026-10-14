@@ -1,0 +1,32 @@
+{
+  "name": "lingxi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lingxi is a private OpenAI-compatible API relay and gateway with multi-tenant keys, quotas, and usage billing.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "node --disable-warning=ExperimentalWarning node_modules/tsx/dist/cli.mjs watch src/index.ts",
+    "start": "node --disable-warning=ExperimentalWarning dist/index.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.6",
+    "hono": "^4.10.3",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "license": "MIT"
+}

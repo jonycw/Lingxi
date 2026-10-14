@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-shell="ide">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>灵犀 Lingxi</title>
+    <link rel="icon" href="/console/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/console/static/console.css" />
+    <script src="/console/static/boot.js"></script>
+  </head>
+  <body>
+    <div class="ide">
+      <aside class="ide-side">
+        <a class="ide-brand" href="/">灵犀</a>
+        <a class="button" href="/console">新对话</a>
+        <div class="ide-foot">
+          <a class="button button-ghost" href="/admin/ui">管理台</a>
+          <a class="button button-ghost" href="/console">客户对话台</a>
+        </div>
+      </aside>
+      <main class="ide-main">
+        <div class="ide-stream">
+          <div class="ide-column home-hero">
+            <p class="muted">LINGXI · 私人 API 网关</p>
+            <h1>灵犀</h1>
+            <p>
+              给客户发放 <code>lx_</code> 密钥，由这台服务器代为访问你购买的 Cursor 或其它 OpenAI 兼容上游。页面资源都由本机提供。
+            </p>
+            <a class="composer-box home-link" href="/console">
+              <strong>开始对话</strong>
+              <div class="muted">使用客户密钥进入对话台</div>
+            </a>
+            <section class="card">
+              <h2>接口索引</h2>
+              <ul class="index-list">
+                <li><code>GET /health</code> 健康检查</li>
+                <li><code>GET /v1/models</code> 模型列表</li>
+                <li><code>GET /v1/me</code> 余额与配额</li>
+                <li><code>POST /v1/chat/completions</code> 对话</li>
+                <li><code>GET /admin/upstream</code> 上游设置，需要管理员令牌</li>
+              </ul>
+              <p class="muted">请求头带 <code>Accept: application/json</code> 时，<code>GET /</code> 仍返回 JSON。</p>
+            </section>
+            <p class="muted">Admin: <a href="/admin/ui">/admin/ui</a> · Chat: <a href="/console">/console</a></p>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

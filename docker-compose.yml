@@ -1,0 +1,41 @@
+# Local Lingxi. Copy `.env.example` to `.env` first.
+# The upstream key and admin token come from the env file, never from this compose file.
+
+services:
+  lingxi:
+    build: .
+    ports:
+      - "${PORT:-8787}:8787"
+    env_file:
+      - .env
+    environment:
+      LINGXI_HOST: 0.0.0.0
+      PORT: 8787
+      DATABASE_URL: ${DATABASE_URL:-file:/data/lingxi.sqlite}
+    volumes:
+      - lingxi-data:/data
+    restart: unless-stopped
+
+  # Optional Postgres path (local default password is "lingxi"; override before any shared use):
+  #   POSTGRES_PASSWORD=change-me docker compose --profile postgres up
+  # Then point DATABASE_URL at postgres://lingxi:<password>@postgres:5432/lingxi
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lingxi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lingxi}
+      POSTGRES_DB: ${POSTGRES_DB:-lingxi}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lingxi} -d ${POSTGRES_DB:-lingxi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  lingxi-data:
+  pgdata:
