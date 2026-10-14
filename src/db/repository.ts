@@ -787,6 +787,35 @@ export function createRepository() {
         return { applied: true, balanceMicros: updated.balanceMicros };
       });
     },
+    async getSetting(db: Executor, key: string): Promise<string | null> {
+      const row = await db.get<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', [key]);
+      return row?.value ?? null;
+    },
+    async setSetting(db: Executor, key: string, value: string, now: string): Promise<void> {
+      await db.run(
+        `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        [key, value, now],
+      );
+    },
+    async deleteSetting(db: Executor, key: string): Promise<void> {
+      await db.run('DELETE FROM app_settings WHERE key = ?', [key]);
+    },
+    async listAllKeys(
+      db: Executor,
+      limit: number,
+      offset: number,
+    ): Promise<Array<ApiKeyRecord & { customerName: string }>> {
+      const rows = await db.all<KeyRow & { customer_name: string }>(
+        `SELECT k.*, c.name AS customer_name
+         FROM api_keys k
+         JOIN customers c ON c.id = k.customer_id
+         ORDER BY k.created_at DESC
+         LIMIT ? OFFSET ?`,
+        [limit, offset],
+      );
+      return rows.map((row) => ({ ...mapKey(row), customerName: row.customer_name }));
+    },
   };
 }
 

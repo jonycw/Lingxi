@@ -46,15 +46,22 @@ let server: ServerType | undefined;
 
 async function main(): Promise<void> {
   await migrate(db, { usageRetentionDays: config.usageRetentionDays });
-  const app = createApp({ config, db, logger });
+  const { createRepository } = await import('./db/repository.js');
+  const { createModelCatalog } = await import('./models.js');
+  const { createRuntimeSettings } = await import('./runtimeSettings.js');
+  const repo = createRepository();
+  const models = createModelCatalog(config.modelConfigPath);
+  const runtime = createRuntimeSettings({ config, db, repo, models });
+  const live = await runtime.effective();
+  const app = createApp({ config, db, repo, models, logger, runtime });
   if (config.adminToken === 'dev-admin-token-change-me') {
     logger.warn('admin_token_is_example', {
       hint: 'Change ADMIN_TOKEN before exposing Lingxi beyond this machine',
     });
   }
-  if (config.upstreamMode === 'mock') {
+  if (live.mode === 'mock') {
     logger.warn('upstream_mock', {
-      hint: 'UPSTREAM_API_KEY is empty or UPSTREAM_MOCK=true. Chat calls return local mock completions.',
+      hint: 'Chat uses the local mock until an upstream key is saved in the admin console or set with UPSTREAM_API_KEY.',
     });
   }
   server = serve(
@@ -70,8 +77,8 @@ async function main(): Promise<void> {
         host: info.address,
         port: info.port,
         database: db.dialect,
-        upstream: config.upstreamMode,
-        upstream_base_url: config.upstreamMode === 'proxy' ? config.upstreamBaseUrl : undefined,
+        upstream: live.mode,
+        upstream_base_url: live.mode === 'proxy' ? live.baseUrl : undefined,
       });
     },
   );

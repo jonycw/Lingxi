@@ -13,6 +13,7 @@ export type AppConfig = {
   upstreamBaseUrl: string;
   upstreamApiKey: string;
   upstreamTimeoutMs: number;
+  upstreamMock: boolean;
   upstreamMode: UpstreamMode;
   adminToken: string;
   corsOrigins: string[];
@@ -104,8 +105,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   }
 
   const upstreamApiKey = (env.UPSTREAM_API_KEY ?? '').trim();
-  const forceMock = boolEnv(env, 'UPSTREAM_MOCK', false);
-  const upstreamMode: UpstreamMode = forceMock || upstreamApiKey.length === 0 ? 'mock' : 'proxy';
+  const upstreamMock = boolEnv(env, 'UPSTREAM_MOCK', false);
+  const upstreamMode: UpstreamMode = upstreamMock || upstreamApiKey.length === 0 ? 'mock' : 'proxy';
   const upstreamBaseUrl = (env.UPSTREAM_BASE_URL ?? 'https://api.openai.com/v1').trim().replace(/\/+$/, '');
   if (upstreamMode === 'proxy' && !/^https?:\/\//i.test(upstreamBaseUrl)) {
     throw new Error('UPSTREAM_BASE_URL must be an http or https URL when an upstream key is set');
@@ -126,6 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     upstreamBaseUrl,
     upstreamApiKey,
     upstreamTimeoutMs: intEnv(env, 'UPSTREAM_TIMEOUT_MS', 120_000, 1000, 600_000),
+    upstreamMock,
     upstreamMode,
     adminToken,
     corsOrigins: parseOrigins(env.CORS_ORIGINS),

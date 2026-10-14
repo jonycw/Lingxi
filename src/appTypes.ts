@@ -5,6 +5,7 @@ import type { Db } from './db/executor.js';
 import type { Repository } from './db/repository.js';
 import type { Logger } from './logger.js';
 import type { ModelCatalog } from './models.js';
+import type { RuntimeSettings } from './runtimeSettings.js';
 import type { AuthContext } from './types.js';
 import type { Upstream } from './upstream.js';
 
@@ -20,6 +21,7 @@ export type AppDeps = {
   logger: Logger;
   models: ModelCatalog;
   upstream: Upstream;
+  runtime: RuntimeSettings;
   now: () => Date;
   failLimiter: FailLimiter;
 };

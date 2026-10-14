@@ -130,9 +130,11 @@ POSTGRES_PASSWORD=change-me docker compose --profile postgres up
 
 管理台别名是 `/console/admin`，对话台别名是 `/app`。
 
-管理台用 `.env` 里的 `ADMIN_TOKEN` 登录。令牌只写入当前标签页的 `sessionStorage`，关闭标签即清除，不会写进仓库。登录后可以新建客户、给余额充值、签发或吊销 `lx_` 密钥、修改模型价格、查看用量汇总。完整密钥只在签发成功的当次显示，请立即复制。
+管理台是左侧导航的仓库式界面，分区为总览、客户、密钥、积分、价格、用量、上游、系统。用 `.env` 里的 `ADMIN_TOKEN` 登录。令牌只写入当前标签页的 `sessionStorage`，关闭标签即清除，不会写进仓库。登录后可以新建客户、给余额充值、签发或吊销 `lx_` 密钥、修改模型价格、查看用量汇总。完整客户密钥只在签发成功的当次显示，请立即复制。
 
-客户把拿到的 `lx_` 密钥粘贴到对话台。对话台用 `GET /v1/models` 填充模型列表，用 `POST /v1/chat/completions` 发消息，账户页显示 `GET /v1/me` 的余额与配额，以及 `GET /v1/usage` 的最近调用。`UPSTREAM_API_KEY` 留空时是模拟模式，回复里会包含「灵犀模拟」。
+上游页可以保存 Cursor 或其它 OpenAI 兼容服务的地址、密钥、模拟开关和模型映射。`.env` 里的 `UPSTREAM_BASE_URL`、`UPSTREAM_API_KEY`、`UPSTREAM_MOCK` 以及 `config/models.json` 只是启动默认值。保存后写入数据库并立刻生效，不用重启进程。读取接口只返回密钥是否已设置和末四位，不会回显完整密钥，日志也不会记下它。留空密钥框表示不修改；勾选「清除已保存的密钥」则退回环境变量。勾选「模拟模式」时对话走本地模拟。关闭模拟且存在密钥时，客户对话会转发到保存的上游。数据库文件会保存该密钥，请保护 `data/`，不要提交。
+
+客户把拿到的 `lx_` 密钥粘贴到对话台。对话台是深色聊天界面：左侧是本机保存的历史对话，底部是输入框和模型选择。它用 `GET /v1/models` 填充模型列表，用 `POST /v1/chat/completions` 发消息，账户页显示 `GET /v1/me` 的余额与配额，以及 `GET /v1/usage` 的最近调用。没有上游密钥时是模拟模式，回复里会包含「灵犀模拟」。
 
 页面、样式和图标都从 `public/` 由同一进程提供，不请求外部 CDN。浏览器访问 `/` 且 `Accept` 包含 `text/html` 时返回首页；`curl` 或不带该头时仍返回 JSON 索引。右上角可切换中文 / English 和浅色 / 深色。
 
@@ -145,9 +147,9 @@ POSTGRES_PASSWORD=change-me docker compose --profile postgres up
 | `PORT` | 监听端口，默认 `8787` |
 | `LINGXI_HOST` | 监听地址，默认 `0.0.0.0` |
 | `DATABASE_URL` | `file:./data/lingxi.sqlite`，或 `postgres://...` / `postgresql://...` |
-| `UPSTREAM_BASE_URL` | 上游 OpenAI 兼容根路径，需包含 `/v1`，例如 `https://api.openai.com/v1` |
-| `UPSTREAM_API_KEY` | 上游密钥。留空则进入模拟模式 |
-| `UPSTREAM_MOCK` | `true` 时即使有密钥也走模拟 |
+| `UPSTREAM_BASE_URL` | 上游 OpenAI 兼容根路径，需包含 `/v1`。启动默认值，可被管理台覆盖 |
+| `UPSTREAM_API_KEY` | 上游密钥。留空且未在管理台保存密钥时进入模拟模式 |
+| `UPSTREAM_MOCK` | `true` 时即使有密钥也走模拟。管理台可以覆盖 |
 | `UPSTREAM_TIMEOUT_MS` | 上游超时，默认 120000 |
 | `ADMIN_TOKEN` | 管理接口 Bearer。`NODE_ENV=production` 时拒绝示例值和短于 16 字符的值 |
 | `CORS_ORIGINS` | `*`、逗号分隔的源，或留空以关闭 CORS |
@@ -215,6 +217,9 @@ Authorization: Bearer lx_...
 | `POST` | `/admin/keys/:id/revoke` | 吊销 |
 | `GET` | `/admin/usage` | 用量明细。可用 `customer_id`、`api_key_id`、`from`、`to` |
 | `GET` | `/admin/usage/summary` | 按客户、密钥、模型汇总 |
+| `GET` | `/admin/keys` | 全部密钥元数据，含客户名，不含明文 |
+| `GET` | `/admin/upstream` | 生效的上游地址、模拟开关、模型映射。密钥只返回 `key_set` 和 `key_last4` |
+| `PUT` | `/admin/upstream` | 保存 `base_url`、`api_key`（只写）、`clear_api_key`、`mock`、`models`。`reset: true` 恢复环境变量。立即生效 |
 | `GET` | `/admin/models` | 目录、上游映射、文件价、覆盖价、生效价 |
 | `GET` | `/admin/prices` | 同上 |
 | `PUT` | `/admin/prices` | 覆盖价格或 `enabled`。字段传 `null` 表示恢复文件默认 |
@@ -322,6 +327,7 @@ src/auth.ts            客户密钥与管理员令牌
 src/billing.ts         准入：余额、配额、速率
 src/billingCost.ts     整数计价
 src/upstream.ts        上游代理与本地模拟
+src/runtimeSettings.ts 上游设置：环境变量为默认，数据库覆盖并立即生效
 src/payments.ts        HMAC 支付回调
 src/routes/ui.ts       首页、管理台、对话台
 src/db/                SQLite、Postgres 和共用 SQL
@@ -331,7 +337,7 @@ public/                控制台页面、样式和脚本
 
 ## English
 
-Lingxi is a private OpenAI-compatible gateway. Customers send `Authorization: Bearer lx_...` to your server. Lingxi forwards chat requests to `UPSTREAM_BASE_URL` with `UPSTREAM_API_KEY`. Those values come only from the environment. This repository does not contain a real upstream key.
+Lingxi is a private OpenAI-compatible gateway. Customers send `Authorization: Bearer lx_...` to your server. Lingxi forwards chat requests to the configured upstream with the owner's key. Environment variables are the bootstrap defaults. Values saved in the admin console are stored in the database and apply on the next request. This repository does not contain a real upstream key.
 
 ### Run locally
 
@@ -356,7 +362,7 @@ curl -s http://127.0.0.1:8787/health
 
 `npm run dev` reloads TypeScript. `npm run build && npm start` runs the compiled server. Docker: `cp .env.example .env && docker compose up --build`.
 
-Leave `UPSTREAM_API_KEY` empty to boot in mock mode. Mock completions are still authenticated, rate limited, and billed. Set the key and `UPSTREAM_MOCK=false` to proxy. `UPSTREAM_BASE_URL` must include the `/v1` prefix (`https://api.openai.com/v1` is the example). Point it at whatever OpenAI-compatible base URL your Cursor or other upstream account uses, and map public model ids in `config/models.json`.
+Leave `UPSTREAM_API_KEY` empty to boot in mock mode. Mock completions are still authenticated, rate limited, and billed. Set the key and `UPSTREAM_MOCK=false` to proxy, or save the same values under Admin → Upstream. `UPSTREAM_BASE_URL` must include the `/v1` prefix (`https://api.openai.com/v1` is the example). Point it at the OpenAI-compatible base URL for the Cursor account you purchased, and map public model ids in `config/models.json` or on that settings page. `GET /admin/upstream` returns only whether the key is set and its last four characters.
 
 Change `ADMIN_TOKEN` before exposing the port. Production mode refuses the example token.
 
@@ -366,7 +372,7 @@ Change `ADMIN_TOKEN` before exposing the port. Production mode refuses the examp
 - Admin: http://127.0.0.1:8787/admin/ui (`ADMIN_TOKEN`, kept in `sessionStorage` for this tab only)
 - Customer chat: http://127.0.0.1:8787/console (paste an `lx_` key)
 
-Aliases: `/console/admin` and `/app`. The same Node process serves `public/` with no CDN. `GET /` returns HTML when `Accept` includes `text/html`, and a JSON index otherwise. `GET /v1/me` returns the current key's balance and quota without the secret. With an empty `UPSTREAM_API_KEY`, the chat console talks to the mock upstream.
+Aliases: `/console/admin` and `/app`. The admin console is a sidebar warehouse layout (Dashboard, Customers, Keys, Credits, Prices, Usage, Upstream, System). The customer console is a dark chat workspace with a history sidebar and a bottom composer. The same Node process serves `public/` with no CDN. `GET /` returns HTML when `Accept` includes `text/html`, and a JSON index otherwise. `GET /v1/me` returns the current key's balance and quota without the secret. With no upstream key, the chat console talks to the mock upstream.
 
 ### Issue a key and call the API
 

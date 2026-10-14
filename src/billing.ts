@@ -24,7 +24,7 @@ export async function resolveBillableModel(deps: AppDeps, modelId: string): Prom
     }
     return {
       id: modelId,
-      upstream: modelId,
+      upstream: await deps.runtime.upstreamName(modelId, modelId),
       ownedBy: 'passthrough',
       inputMicrosPerMillion: deps.config.defaultInputMicrosPerMillion,
       outputMicrosPerMillion: deps.config.defaultOutputMicrosPerMillion,
@@ -37,7 +37,7 @@ export async function resolveBillableModel(deps: AppDeps, modelId: string): Prom
   }
   return {
     id: fromFile.id,
-    upstream: fromFile.upstream,
+    upstream: await deps.runtime.upstreamName(fromFile.id, fromFile.upstream),
     ownedBy: fromFile.ownedBy,
     inputMicrosPerMillion: override?.inputMicrosPerMillion ?? fromFile.inputMicrosPerMillion,
     outputMicrosPerMillion: override?.outputMicrosPerMillion ?? fromFile.outputMicrosPerMillion,

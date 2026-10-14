@@ -8,12 +8,13 @@ import {
   mountChrome,
   setLang,
   setTheme,
-  shell,
   t,
   theme,
+  toolbar,
 } from './ui.js';
 
 const client = createClient('lingxi.user.token');
+const HISTORY_KEY = 'lingxi.chats.v1';
 const state = {
   health: null,
   authed: false,
@@ -21,7 +22,10 @@ const state = {
   me: null,
   usage: [],
   models: [],
+  model: '',
   messages: [],
+  chats: [],
+  activeId: '',
   error: '',
   notice: '',
   busy: false,
@@ -29,34 +33,86 @@ const state = {
 
 const app = document.querySelector('#app');
 
+function loadChats() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persist() {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(state.chats.slice(0, 30)));
+}
+
+function snapshot() {
+  if (!state.messages.some((message) => message.role === 'user' && message.content)) return;
+  if (!state.activeId) state.activeId = crypto.randomUUID();
+  const title = state.messages.find((message) => message.role === 'user' && message.content)?.content.slice(0, 28) || t('newChat');
+  const row = {
+    id: state.activeId,
+    title,
+    messages: state.messages.filter((message) => message.content),
+    model: state.model,
+    updatedAt: new Date().toISOString(),
+  };
+  const index = state.chats.findIndex((chat) => chat.id === state.activeId);
+  if (index >= 0) state.chats.splice(index, 1);
+  state.chats.unshift(row);
+  state.chats = state.chats.slice(0, 30);
+  persist();
+}
+
 function render() {
   if (!state.authed) {
     app.innerHTML = `
-      <main class="login card">
-        ${shell({ title: t('userTitle'), health: state.health, signedIn: false })}
-        <h2>${esc(t('loginUserTitle'))}</h2>
-        <p class="muted">${esc(t('userHint'))}</p>
-        ${banner(state.error, '')}
-        <form data-form="login">
-          <label>${esc(t('apiKey'))}
-            <input name="key" type="password" autocomplete="off" spellcheck="false" required placeholder="lx_" />
-          </label>
-          <button class="button" type="submit">${esc(t('signIn'))}</button>
-        </form>
+      <main class="ide-login">
+        <section class="card">
+          ${toolbar({ signedIn: false })}
+          <h2>${esc(t('loginUserTitle'))}</h2>
+          <p class="muted">${esc(t('userHint'))}</p>
+          ${banner(state.error, '')}
+          <form data-form="login">
+            <label>${esc(t('apiKey'))}
+              <input name="key" type="password" autocomplete="off" spellcheck="false" required placeholder="lx_" />
+            </label>
+            <button class="button" type="submit">${esc(t('signIn'))}</button>
+          </form>
+        </section>
       </main>`;
     return;
   }
   app.innerHTML = `
-    <div class="shell">
-      ${shell({ title: t('userTitle'), health: state.health, signedIn: true })}
-      <nav class="nav">
-        <button class="button button-ghost" type="button" data-action="nav" data-view="chat" ${state.view === 'chat' ? 'aria-current="page"' : ''}>${esc(t('chat'))}</button>
-        <button class="button button-ghost" type="button" data-action="nav" data-view="account" ${state.view === 'account' ? 'aria-current="page"' : ''}>${esc(t('account'))}</button>
-      </nav>
-      ${banner(state.error, state.notice)}
-      ${state.view === 'chat' ? chatView() : accountView()}
+    <div class="ide">
+      <aside class="ide-side">
+        <a class="ide-brand" href="/">灵犀</a>
+        <button class="button" type="button" data-action="new-chat">${esc(t('newChat'))}</button>
+        <div class="ide-chats">
+          ${
+            state.chats.length
+              ? state.chats
+                  .map(
+                    (chat) => `<div class="ide-chat">
+                      <button class="chat-open" type="button" data-action="open-chat" data-id="${esc(chat.id)}" ${chat.id === state.activeId ? 'aria-current="page"' : ''}>${esc(chat.title)}</button>
+                      <button class="icon-button" type="button" data-action="delete-chat" data-id="${esc(chat.id)}" aria-label="${esc(t('deleteChat'))}">×</button>
+                    </div>`,
+                  )
+                  .join('')
+              : `<p class="muted">${esc(t('emptyChats'))}</p>`
+          }
+        </div>
+        <div class="ide-foot">
+          <button class="button button-ghost" type="button" data-action="nav" data-view="account" ${state.view === 'account' ? 'aria-current="page"' : ''}>${esc(t('account'))}</button>
+          <button class="button button-ghost" type="button" data-action="nav" data-view="chat" ${state.view === 'chat' ? 'aria-current="page"' : ''}>${esc(t('chat'))}</button>
+        </div>
+      </aside>
+      <section class="ide-main">
+        ${toolbar({ signedIn: true })}
+        ${state.view === 'account' ? accountPane() : chatPane()}
+      </section>
     </div>`;
-  const box = document.querySelector('.transcript');
+  const box = document.querySelector('.ide-stream');
   if (box) box.scrollTop = box.scrollHeight;
 }
 
@@ -64,7 +120,7 @@ function quotaText(value) {
   return value === null || value === undefined ? t('unlimited') : String(value);
 }
 
-function accountView() {
+function accountPane() {
   const me = state.me;
   const quota = me?.quota || {};
   const rows = state.usage
@@ -79,61 +135,71 @@ function accountView() {
     )
     .join('');
   return `
-    <section class="stats">
-      <div class="stat"><span>${esc(t('balance'))}</span><b>${esc(me?.customer?.balance_credits ?? '0')}</b></div>
-      <div class="stat"><span>${esc(t('tokens'))}</span><b>${esc(quota.total_tokens ?? 0)}</b></div>
-      <div class="stat"><span>${esc(t('keyPrefix'))}</span><b>${esc(me?.api_key?.prefix ?? '')}</b></div>
-    </section>
-    <section class="card">
-      <p class="muted">${esc(me?.customer?.name || '')} · ${esc(t('period'))} ${esc(quota.period_key || '')}</p>
-      <p class="muted">${esc(t('soft'))}: ${esc(quotaText(quota.soft_quota_tokens))} · ${esc(t('hard'))}: ${esc(quotaText(quota.hard_quota_tokens))}</p>
-      <h2>${esc(t('recent'))}</h2>
-      ${
-        rows
-          ? `<div class="table-wrap"><table>
-              <thead><tr><th>${esc(t('lastUsed'))}</th><th>${esc(t('model'))}</th><th class="num">${esc(t('tokens'))}</th><th class="num">${esc(t('cost'))}</th><th>${esc(t('status'))}</th></tr></thead>
-              <tbody>${rows}</tbody>
-            </table></div>`
-          : `<p class="muted">${esc(t('emptyUsage'))}</p>`
-      }
-    </section>`;
+    <div class="ide-stream">
+      <div class="ide-column">
+        ${banner(state.error, state.notice)}
+        <section class="stats">
+          <div class="stat"><span>${esc(t('balance'))}</span><b>${esc(me?.customer?.balance_credits ?? '0')}</b></div>
+          <div class="stat"><span>${esc(t('tokens'))}</span><b>${esc(quota.total_tokens ?? 0)}</b></div>
+          <div class="stat"><span>${esc(t('keyPrefix'))}</span><b>${esc(me?.api_key?.prefix ?? '')}</b></div>
+        </section>
+        <section class="card">
+          <p class="muted">${esc(me?.customer?.name || '')} · ${esc(t('period'))} ${esc(quota.period_key || '')}</p>
+          <p class="muted">${esc(t('soft'))}: ${esc(quotaText(quota.soft_quota_tokens))} · ${esc(t('hard'))}: ${esc(quotaText(quota.hard_quota_tokens))}</p>
+          <h2>${esc(t('recent'))}</h2>
+          ${
+            rows
+              ? `<div class="table-wrap"><table>
+                  <thead><tr><th>${esc(t('lastUsed'))}</th><th>${esc(t('model'))}</th><th class="num">${esc(t('tokens'))}</th><th class="num">${esc(t('cost'))}</th><th>${esc(t('status'))}</th></tr></thead>
+                  <tbody>${rows}</tbody>
+                </table></div>`
+              : `<p class="muted">${esc(t('emptyUsage'))}</p>`
+          }
+        </section>
+      </div>
+    </div>`;
 }
 
-function chatView() {
+function chatPane() {
   const options = state.models
-    .map((model) => `<option value="${esc(model.id)}">${esc(model.id)}</option>`)
+    .map((model) => `<option value="${esc(model.id)}" ${model.id === state.model ? 'selected' : ''}>${esc(model.id)}</option>`)
     .join('');
   const bubbles = state.messages
-    .map(
-      (message, index) => `<div class="bubble ${message.role === 'user' ? 'user' : 'assistant'}" ${index === state.messages.length - 1 && message.role === 'assistant' ? 'data-stream="1"' : ''}>
-        <span class="who">${esc(message.role === 'user' ? t('you') : t('assistant'))}</span>${esc(message.content || (state.busy ? t('thinking') : ''))}
-      </div>`,
-    )
+    .map((message, index) => {
+      const streaming = index === state.messages.length - 1 && message.role === 'assistant' ? 'data-stream="1"' : '';
+      const text = message.content || (state.busy ? t('thinking') : '');
+      if (message.role === 'user') {
+        return `<div class="msg msg-user" ${streaming}><span class="who">${esc(t('you'))}</span>${esc(text)}</div>`;
+      }
+      return `<div class="msg msg-assistant" ${streaming}><span class="who">${esc(t('assistant'))}</span>${esc(text)}</div>`;
+    })
     .join('');
   return `
-    <section class="card">
-      <div class="transcript">${bubbles || `<p class="muted">${esc(t('message'))}</p>`}</div>
-      <form data-form="chat">
-        <div class="form-row">
+    <div class="ide-stream">
+      <div class="ide-column">
+        ${banner(state.error, state.notice)}
+        ${bubbles || `<p class="muted">${esc(t('message'))}</p>`}
+      </div>
+    </div>
+    <form class="composer-dock" data-form="chat">
+      <div class="ide-column composer-box">
+        <label>${esc(t('message'))}<textarea name="content" required placeholder="${esc(t('message'))}"></textarea></label>
+        <div class="composer-tools">
           <label>${esc(t('model'))}
             <select name="model" ${state.models.length ? '' : 'disabled'}>${options}</select>
           </label>
           <label class="check"><input type="checkbox" name="stream" checked /> ${esc(t('stream'))}</label>
-        </div>
-        <div class="composer">
-          <label>${esc(t('message'))}<textarea name="content" required></textarea></label>
           <button class="button" type="submit" ${state.busy || !state.models.length ? 'disabled' : ''}>${esc(t('send'))}</button>
         </div>
         ${state.models.length ? '' : `<p class="muted">${esc(t('noModels'))}</p>`}
-      </form>
-    </section>`;
+      </div>
+    </form>`;
 }
 
 async function refreshAccount() {
   state.me = await client.request('/v1/me');
   const usage = await client.request('/v1/usage?limit=20');
   state.usage = usage.data || [];
-  if (!state.me?.customer) state.me = { ...state.me, customer: { balance_credits: usage.balance_credits } };
 }
 
 async function guard(work) {
@@ -156,6 +222,7 @@ async function guard(work) {
 }
 
 async function boot() {
+  state.chats = loadChats();
   state.health = await loadHealth();
   if (!client.token()) {
     render();
@@ -163,6 +230,7 @@ async function boot() {
   }
   await guard(async () => {
     state.models = (await client.request('/v1/models')).data || [];
+    state.model = state.models[0]?.id || '';
     await refreshAccount();
     state.authed = true;
   });
@@ -175,13 +243,13 @@ function paintStream(text) {
   node.textContent = '';
   if (who) node.appendChild(who);
   node.append(text || t('thinking'));
-  const box = document.querySelector('.transcript');
+  const box = document.querySelector('.ide-stream');
   if (box) box.scrollTop = box.scrollHeight;
 }
 
 async function readSse(response, onDelta) {
   const reader = response.body?.getReader();
-  if (!reader) return;
+  if (!reader) return '';
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
@@ -241,11 +309,40 @@ mountChrome((action, target) => {
     if (!state.authed) return;
     state.view = target.dataset.view || 'chat';
     state.error = '';
-    state.notice = '';
     if (state.view === 'account') {
       void guard(refreshAccount);
       return;
     }
+    render();
+    return;
+  }
+  if (action === 'new-chat') {
+    snapshot();
+    state.activeId = '';
+    state.messages = [];
+    state.view = 'chat';
+    state.error = '';
+    render();
+    return;
+  }
+  if (action === 'open-chat' && target.dataset.id) {
+    snapshot();
+    const chat = state.chats.find((item) => item.id === target.dataset.id);
+    if (!chat) return;
+    state.activeId = chat.id;
+    state.messages = (chat.messages || []).map((message) => ({ ...message }));
+    if (chat.model) state.model = chat.model;
+    state.view = 'chat';
+    render();
+    return;
+  }
+  if (action === 'delete-chat' && target.dataset.id) {
+    state.chats = state.chats.filter((chat) => chat.id !== target.dataset.id);
+    if (state.activeId === target.dataset.id) {
+      state.activeId = '';
+      state.messages = [];
+    }
+    persist();
     render();
   }
 });
@@ -259,6 +356,7 @@ app.addEventListener('submit', (event) => {
     client.setToken(String(data.get('key') || '').trim());
     void guard(async () => {
       state.models = (await client.request('/v1/models')).data || [];
+      state.model = state.models[0]?.id || '';
       await refreshAccount();
       state.authed = true;
       state.view = 'chat';
@@ -267,11 +365,13 @@ app.addEventListener('submit', (event) => {
   }
   if (form.dataset.form === 'chat') {
     const content = String(data.get('content') || '').trim();
-    const model = String(data.get('model') || '');
+    const model = String(data.get('model') || state.model || '');
     const stream = data.get('stream') === 'on';
     if (!content || !model) return;
+    state.model = model;
     state.messages.push({ role: 'user', content });
     state.messages.push({ role: 'assistant', content: '' });
+    state.view = 'chat';
     state.busy = true;
     state.error = '';
     render();
@@ -286,10 +386,9 @@ app.addEventListener('submit', (event) => {
           body: JSON.stringify({
             model,
             stream,
-            messages: state.messages.filter((message) => message.role === 'user' || message.content).map((message) => ({
-              role: message.role,
-              content: message.content,
-            })),
+            messages: state.messages
+              .filter((message) => message.role === 'user' || message.content)
+              .map((message) => ({ role: message.role, content: message.content })),
           }),
         });
         if (!response.ok) {
@@ -306,14 +405,16 @@ app.addEventListener('submit', (event) => {
         }
         const last = state.messages[state.messages.length - 1];
         if (stream) {
-          last.content = (await readSse(response, (text) => {
-            last.content = text;
-            paintStream(text);
-          })) || last.content;
+          last.content =
+            (await readSse(response, (text) => {
+              last.content = text;
+              paintStream(text);
+            })) || last.content;
         } else {
           const body = await response.json();
           last.content = body?.choices?.[0]?.message?.content || '';
         }
+        snapshot();
         await refreshAccount();
       } catch (error) {
         if (error.status === 401) {

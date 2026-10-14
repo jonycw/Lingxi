@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
+import type { EffectiveUpstream } from './runtimeSettings.js';
 import type { Logger } from './logger.js';
 import { scrubSecrets } from './redact.js';
 import {
@@ -231,16 +232,21 @@ function upstreamFailure(status: number, text: string, headers: Headers, secrets
   return new ApiError(502, 'Upstream request failed', 'upstream_error', 'upstream_error', extra, scrubbed);
 }
 
-function createProxyUpstream(config: AppConfig, fetchImpl: FetchLike, logger: Logger): Upstream {
-  const endpoint = `${config.upstreamBaseUrl}/chat/completions`;
-
+function createProxyUpstream(
+  config: AppConfig,
+  fetchImpl: FetchLike,
+  logger: Logger,
+  resolve: () => Promise<EffectiveUpstream>,
+): Upstream {
   const send = async (input: UpstreamRequest, stream: boolean): Promise<Response> => {
+    const live = await resolve();
+    const endpoint = `${live.baseUrl}/chat/completions`;
     const body = JSON.stringify(input.body);
     try {
       return await fetchImpl(endpoint, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${config.upstreamApiKey}`,
+          Authorization: `Bearer ${live.apiKey}`,
           'Content-Type': 'application/json',
           Accept: stream ? 'text/event-stream' : 'application/json',
           'User-Agent': `lingxi-gateway/${VERSION}`,
@@ -335,12 +341,42 @@ function createProxyUpstream(config: AppConfig, fetchImpl: FetchLike, logger: Lo
 
 export function createUpstream(
   config: AppConfig,
-  options: { fetchImpl?: FetchLike; now: () => Date; logger: Logger },
+  options: {
+    fetchImpl?: FetchLike;
+    now: () => Date;
+    logger: Logger;
+    resolve?: () => Promise<EffectiveUpstream>;
+  },
 ): Upstream {
-  if (config.upstreamMode === 'mock') {
-    return createMockUpstream(options.now);
-  }
-  return createProxyUpstream(config, options.fetchImpl ?? fetch, options.logger);
+  const resolve =
+    options.resolve ??
+    (async () => ({
+      baseUrl: config.upstreamBaseUrl,
+      apiKey: config.upstreamApiKey,
+      mock: config.upstreamMock,
+      mode: config.upstreamMode,
+      baseUrlSource: 'env' as const,
+      keySource: config.upstreamApiKey ? ('env' as const) : ('none' as const),
+      mockSource: 'env' as const,
+    }));
+  const mock = createMockUpstream(options.now);
+  const proxy = createProxyUpstream(config, options.fetchImpl ?? fetch, options.logger, resolve);
+  return {
+    async complete(input) {
+      const live = await resolve();
+      if (live.mode === 'mock') {
+        return mock.complete(input);
+      }
+      return proxy.complete(input);
+    },
+    async openStream(input) {
+      const live = await resolve();
+      if (live.mode === 'mock') {
+        return mock.openStream(input);
+      }
+      return proxy.openStream(input);
+    },
+  };
 }
 
 export function upstreamRequestBody(raw: Record<string, unknown>, upstreamModel: string, stream: boolean): Record<string, unknown> {

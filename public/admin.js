@@ -10,21 +10,25 @@ import {
   mountChrome,
   setLang,
   setTheme,
-  shell,
+  sourceLabel,
   statusLabel,
   t,
   theme,
+  toolbar,
 } from './ui.js';
 
 const client = createClient('lingxi.admin.token');
+const NAV = ['dashboard', 'customers', 'keys', 'credits', 'prices', 'usage', 'upstream', 'system'];
 const state = {
   health: null,
   authed: false,
-  view: 'customers',
+  view: 'dashboard',
   customers: [],
   customer: null,
+  keys: [],
   prices: [],
   summary: [],
+  upstream: null,
   revealed: '',
   error: '',
   notice: '',
@@ -33,47 +37,96 @@ const state = {
 
 const app = document.querySelector('#app');
 
-function money(credits) {
-  return esc(credits ?? '0');
-}
-
 function render() {
   if (!state.authed) {
     app.innerHTML = `
-      <main class="login card">
-        ${shell({ title: t('adminTitle'), health: state.health, signedIn: false })}
-        <h2>${esc(t('loginTitle'))}</h2>
-        <p class="muted">${esc(t('loginHint'))}</p>
-        ${banner(state.error, '')}
-        <form data-form="login">
-          <label>${esc(t('token'))}
-            <input name="token" type="password" autocomplete="off" spellcheck="false" required />
-          </label>
-          <button class="button" type="submit">${esc(t('signIn'))}</button>
-        </form>
+      <main class="erp-login">
+        <section class="card">
+          <h2>${esc(t('loginTitle'))}</h2>
+          <p class="muted">${esc(t('loginHint'))}</p>
+          ${banner(state.error, '')}
+          <form data-form="login">
+            <label>${esc(t('token'))}
+              <input name="token" type="password" autocomplete="off" spellcheck="false" required />
+            </label>
+            <button class="button" type="submit">${esc(t('signIn'))}</button>
+          </form>
+        </section>
       </main>`;
     return;
   }
-
   app.innerHTML = `
-    <div class="shell">
-      ${shell({ title: t('adminTitle'), health: state.health, signedIn: true })}
-      <nav class="nav">
-        ${navButton('customers')}
-        ${navButton('prices')}
-        ${navButton('usage')}
-      </nav>
-      ${banner(state.error, state.notice)}
-      ${state.view === 'customers' ? customersView() : ''}
-      ${state.view === 'customer' ? customerView() : ''}
-      ${state.view === 'prices' ? pricesView() : ''}
-      ${state.view === 'usage' ? usageView() : ''}
+    <div class="erp">
+      <aside class="erp-side">
+        <a class="erp-brand" href="/">灵犀<small>管理台</small></a>
+        <nav class="erp-nav">
+          ${NAV.map((view) => {
+            const current = state.view === view || (view === 'customers' && state.view === 'customer');
+            const label = view === 'credits' ? t('navCredits') : t(view);
+            return `<button type="button" data-action="nav" data-view="${view}" ${current ? 'aria-current="page"' : ''}>${esc(label)}</button>`;
+          }).join('')}
+        </nav>
+      </aside>
+      <section class="erp-main">
+        ${toolbar({ signedIn: true })}
+        <div class="erp-content">
+          ${banner(state.error, state.notice)}
+          ${body()}
+        </div>
+      </section>
     </div>`;
 }
 
-function navButton(view) {
-  const current = state.view === view || (view === 'customers' && state.view === 'customer');
-  return `<button type="button" class="button button-ghost" data-action="nav" data-view="${view}" ${current ? 'aria-current="page"' : ''}>${esc(t(view))}</button>`;
+function body() {
+  if (state.view === 'dashboard') return dashboardView();
+  if (state.view === 'customers') return customersView();
+  if (state.view === 'customer') return customerView();
+  if (state.view === 'keys') return keysView();
+  if (state.view === 'credits') return creditsView();
+  if (state.view === 'prices') return pricesView();
+  if (state.view === 'usage') return usageView();
+  if (state.view === 'upstream') return upstreamView();
+  return systemView();
+}
+
+function modeText(upstream) {
+  if (!upstream) return '';
+  return upstream.mode === 'proxy' ? t('proxy') : t('mock');
+}
+
+function dashboardView() {
+  const upstream = state.upstream;
+  const requests = state.summary.reduce((sum, row) => sum + Number(row.requests || 0), 0);
+  const rows = state.summary
+    .slice(0, 8)
+    .map(
+      (row) => `<tr>
+        <td><code>${esc(row.key_prefix)}</code></td>
+        <td><code>${esc(row.model)}</code></td>
+        <td class="num">${esc(row.requests)}</td>
+        <td class="num">${esc(row.total_tokens)}</td>
+      </tr>`,
+    )
+    .join('');
+  return `
+    <section class="stats">
+      <div class="stat"><span>${esc(t('dashboardCustomers'))}</span><b>${esc(state.customers.length)}</b></div>
+      <div class="stat"><span>${esc(t('dashboardKeys'))}</span><b>${esc(state.keys.length)}</b></div>
+      <div class="stat"><span>${esc(t('dashboardRequests'))}</span><b>${esc(requests)}</b></div>
+      <div class="stat"><span>${esc(t('effectiveMode'))}</span><b>${esc(modeText(upstream))}</b></div>
+    </section>
+    ${upstream && !upstream.mock && !upstream.key_set ? `<p class="banner">${esc(t('noKeyHint'))}</p>` : ''}
+    <section class="card">
+      <h2>${esc(t('usage'))}</h2>
+      ${
+        rows
+          ? `<div class="table-wrap"><table>
+              <thead><tr><th>${esc(t('keyPrefix'))}</th><th>${esc(t('model'))}</th><th class="num">${esc(t('requests'))}</th><th class="num">${esc(t('tokens'))}</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table></div>`
+          : `<p class="muted">${esc(t('emptyUsage'))}</p>`
+      }
+    </section>`;
 }
 
 function customersView() {
@@ -83,7 +136,7 @@ function customersView() {
         <td><button class="row-link" type="button" data-action="open" data-id="${esc(customer.id)}">${esc(customer.name)}</button></td>
         <td>${esc(customer.email || '—')}</td>
         <td>${badge(customer.status)}</td>
-        <td class="num">${money(customer.balance_credits)}</td>
+        <td class="num">${esc(customer.balance_credits)}</td>
       </tr>`,
     )
     .join('');
@@ -106,7 +159,7 @@ function customersView() {
           <label>${esc(t('name'))}<input name="name" required maxlength="200" /></label>
           <label>${esc(t('email'))} <span>(${esc(t('optional'))})</span><input name="email" type="email" maxlength="320" /></label>
           <label>${esc(t('credits'))}<input name="credits" type="number" min="0" step="1" value="0" /></label>
-          <button class="button" type="submit" ${state.busy ? 'disabled' : ''}>${esc(t('create'))}</button>
+          <button class="button" type="submit">${esc(t('create'))}</button>
         </form>
       </section>
     </div>`;
@@ -121,8 +174,6 @@ function customerView() {
         <td>${esc(key.name)}</td>
         <td><code>${esc(key.prefix)}</code></td>
         <td>${badge(key.status)}</td>
-        <td class="num">${esc(key.rate_limit_rpm)}</td>
-        <td>${esc(formatWhen(key.last_used_at))}</td>
         <td>${key.status === 'active' ? `<button class="button button-danger" type="button" data-action="revoke" data-id="${esc(key.id)}">${esc(t('revoke'))}</button>` : ''}</td>
       </tr>`,
     )
@@ -133,19 +184,11 @@ function customerView() {
     <section class="card">
       <div class="stats">
         <div class="stat"><span>${esc(t('name'))}</span><b>${esc(customer.name)}</b></div>
-        <div class="stat"><span>${esc(t('balance'))}</span><b>${money(customer.balance_credits)}</b></div>
+        <div class="stat"><span>${esc(t('balance'))}</span><b>${esc(customer.balance_credits)}</b></div>
         <div class="stat"><span>${esc(t('status'))}</span><b>${esc(statusLabel(customer.status))}</b></div>
       </div>
       <p><button class="button button-ghost" type="button" data-action="status" data-status="${nextStatus}">${esc(nextStatus === 'active' ? t('activate') : t('suspend'))}</button></p>
-      ${
-        state.revealed
-          ? `<div class="banner ok">
-              <p>${esc(t('keyOnce'))}</p>
-              <div class="secret" id="revealed-key">${esc(state.revealed)}</div>
-              <p><button class="button" type="button" data-action="copy">${esc(t('copy'))}</button></p>
-            </div>`
-          : ''
-      }
+      ${revealBox()}
     </section>
     <div class="grid-2">
       <section class="card">
@@ -165,16 +208,98 @@ function customerView() {
       </section>
     </div>
     <section class="card">
-      <h2>${esc(t('keyPrefix'))}</h2>
+      <h2>${esc(t('keys'))}</h2>
       ${
         keys
-          ? `<div class="table-wrap"><table>
-              <thead><tr><th>${esc(t('name'))}</th><th>${esc(t('prefix'))}</th><th>${esc(t('status'))}</th><th class="num">${esc(t('rpm'))}</th><th>${esc(t('lastUsed'))}</th><th></th></tr></thead>
-              <tbody>${keys}</tbody>
-            </table></div>`
+          ? `<div class="table-wrap"><table><thead><tr><th>${esc(t('name'))}</th><th>${esc(t('prefix'))}</th><th>${esc(t('status'))}</th><th></th></tr></thead><tbody>${keys}</tbody></table></div>`
           : `<p class="muted">${esc(t('emptyKeys'))}</p>`
       }
     </section>`;
+}
+
+function revealBox() {
+  if (!state.revealed) return '';
+  return `<div class="banner ok">
+    <p>${esc(t('keyOnce'))}</p>
+    <div class="secret" id="revealed-key">${esc(state.revealed)}</div>
+    <p><button class="button" type="button" data-action="copy">${esc(t('copy'))}</button></p>
+  </div>`;
+}
+
+function customerOptions() {
+  return state.customers
+    .map((customer) => `<option value="${esc(customer.id)}">${esc(customer.name)}</option>`)
+    .join('');
+}
+
+function keysView() {
+  const rows = state.keys
+    .map(
+      (key) => `<tr>
+        <td>${esc(key.customer_name)}</td>
+        <td>${esc(key.name)}</td>
+        <td><code>${esc(key.prefix)}</code></td>
+        <td>${badge(key.status)}</td>
+        <td>${esc(formatWhen(key.last_used_at))}</td>
+        <td>${key.status === 'active' ? `<button class="button button-danger" type="button" data-action="revoke" data-id="${esc(key.id)}">${esc(t('revoke'))}</button>` : ''}</td>
+      </tr>`,
+    )
+    .join('');
+  return `
+    ${revealBox()}
+    <div class="grid-2">
+      <section class="card">
+        <h2>${esc(t('keys'))}</h2>
+        ${
+          rows
+            ? `<div class="table-wrap"><table>
+                <thead><tr><th>${esc(t('customerName'))}</th><th>${esc(t('name'))}</th><th>${esc(t('prefix'))}</th><th>${esc(t('status'))}</th><th>${esc(t('lastUsed'))}</th><th></th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table></div>`
+            : `<p class="muted">${esc(t('emptyKeys'))}</p>`
+        }
+      </section>
+      <section class="card">
+        <h2>${esc(t('issueKey'))}</h2>
+        <form data-form="issue-any">
+          <label>${esc(t('customerName'))}<select name="customer_id" required>${customerOptions()}</select></label>
+          <label>${esc(t('keyName'))}<input name="name" maxlength="100" placeholder="laptop" /></label>
+          <button class="button" type="submit" ${state.customers.length ? '' : 'disabled'}>${esc(t('issue'))}</button>
+        </form>
+      </section>
+    </div>`;
+}
+
+function creditsView() {
+  const rows = state.customers
+    .map(
+      (customer) => `<tr>
+        <td>${esc(customer.name)}</td>
+        <td>${badge(customer.status)}</td>
+        <td class="num">${esc(customer.balance_credits)}</td>
+      </tr>`,
+    )
+    .join('');
+  return `
+    <div class="grid-2">
+      <section class="card">
+        <h2>${esc(t('navCredits'))}</h2>
+        ${
+          rows
+            ? `<div class="table-wrap"><table><thead><tr><th>${esc(t('name'))}</th><th>${esc(t('status'))}</th><th class="num">${esc(t('balance'))}</th></tr></thead><tbody>${rows}</tbody></table></div>`
+            : `<p class="muted">${esc(t('emptyCustomers'))}</p>`
+        }
+      </section>
+      <section class="card">
+        <h2>${esc(t('creditTitle'))}</h2>
+        <form data-form="credit-any">
+          <label>${esc(t('customerName'))}<select name="customer_id" required>${customerOptions()}</select></label>
+          <label>${esc(t('creditAmount'))}<input name="credits" type="number" min="1" step="1" required /></label>
+          <label>${esc(t('note'))}<input name="note" maxlength="500" /></label>
+          <button class="button" type="submit" ${state.customers.length ? '' : 'disabled'}>${esc(t('addCredit'))}</button>
+        </form>
+      </section>
+    </div>`;
 }
 
 function pricesView() {
@@ -229,6 +354,69 @@ function usageView() {
   </section>`;
 }
 
+function upstreamView() {
+  const upstream = state.upstream;
+  if (!upstream) return `<section class="card"><p class="muted">…</p></section>`;
+  const models = (upstream.models || [])
+    .map(
+      (row) => `<tr>
+        <td><code>${esc(row.id)}</code></td>
+        <td><code>${esc(row.file_upstream)}</code></td>
+        <td><input data-upstream-for="${esc(row.id)}" value="${esc(row.upstream)}" maxlength="128" /></td>
+      </tr>`,
+    )
+    .join('');
+  const keyLine = upstream.key_set
+    ? `${t('maskedKey')} ${upstream.key_last4 || '····'} · ${sourceLabel(upstream.key_source)}`
+    : `${t('keyMissing')} · ${sourceLabel(upstream.key_source)}`;
+  return `
+    <section class="card">
+      <h2>${esc(t('upstream'))}</h2>
+      <p class="muted">${esc(t('upstreamHint'))}</p>
+      <p><strong>${esc(t('effectiveMode'))}</strong> ${esc(modeText(upstream))} · ${esc(keyLine)}</p>
+      ${!upstream.mock && !upstream.key_set ? `<p class="banner">${esc(t('noKeyHint'))}</p>` : ''}
+      <form data-form="upstream">
+        <label>${esc(t('baseUrl'))}<input name="base_url" required value="${esc(upstream.base_url)}" spellcheck="false" /></label>
+        <label>${esc(t('upstreamKey'))}
+          <input name="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="${esc(t('keepKey'))}" />
+        </label>
+        <label class="check"><input type="checkbox" name="mock" ${upstream.mock ? 'checked' : ''} /> ${esc(t('mockToggle'))}</label>
+        <label class="check"><input type="checkbox" name="clear_api_key" /> ${esc(t('clearKey'))}</label>
+        <h2>${esc(t('modelMap'))}</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>${esc(t('model'))}</th><th>${esc(t('fileUpstream'))}</th><th>${esc(t('liveUpstream'))}</th></tr></thead>
+          <tbody>${models}</tbody>
+        </table></div>
+        <p class="muted">${esc(t('applyNow'))}</p>
+        <div class="cluster">
+          <button class="button" type="submit">${esc(t('saveUpstream'))}</button>
+          <button class="button button-ghost" type="button" data-action="reset-upstream">${esc(t('resetUpstream'))}</button>
+        </div>
+      </form>
+    </section>`;
+}
+
+function systemView() {
+  const health = state.health || {};
+  const upstream = state.upstream;
+  return `
+    <section class="card">
+      <h2>${esc(t('system'))}</h2>
+      <p class="muted">${esc(t('envBootstrap'))}</p>
+      <p class="muted">${esc(t('systemHint'))}</p>
+      <div class="table-wrap"><table>
+        <tbody>
+          <tr><th>service</th><td>${esc(health.service || '')}</td></tr>
+          <tr><th>version</th><td>${esc(health.version || '')}</td></tr>
+          <tr><th>database</th><td>${esc(health.database?.dialect || '')} · ${esc(health.database?.status || '')}</td></tr>
+          <tr><th>upstream</th><td>${esc(health.upstream || '')}</td></tr>
+          <tr><th>${esc(t('baseUrl'))}</th><td><code>${esc(upstream?.base_url || '')}</code> · ${esc(sourceLabel(upstream?.base_url_source))}</td></tr>
+          <tr><th>${esc(t('upstreamKey'))}</th><td>${esc(upstream?.key_set ? `${t('maskedKey')} ${upstream.key_last4 || ''}` : t('keyMissing'))}</td></tr>
+        </tbody>
+      </table></div>
+    </section>`;
+}
+
 async function guard(work) {
   state.error = '';
   state.busy = true;
@@ -247,15 +435,49 @@ async function guard(work) {
 }
 
 async function loadCustomers() {
-  const body = await client.request('/admin/customers?limit=100');
-  state.customers = body.data || [];
+  state.customers = (await client.request('/admin/customers?limit=100')).data || [];
+}
+
+async function loadKeys() {
+  state.keys = (await client.request('/admin/keys?limit=200')).data || [];
+}
+
+async function loadPrices() {
+  state.prices = (await client.request('/admin/prices')).data || [];
+}
+
+async function loadSummary() {
+  state.summary = (await client.request('/admin/usage/summary')).data || [];
+}
+
+async function loadUpstream() {
+  state.upstream = await client.request('/admin/upstream');
+  state.health = await loadHealth();
 }
 
 async function openCustomer(id, keepReveal) {
-  const body = await client.request(`/admin/customers/${id}`);
-  state.customer = body;
+  state.customer = await client.request(`/admin/customers/${id}`);
   state.view = 'customer';
   if (!keepReveal) state.revealed = '';
+}
+
+async function show(view) {
+  state.view = view;
+  state.notice = '';
+  state.error = '';
+  if (view === 'dashboard') {
+    await Promise.all([loadCustomers(), loadKeys(), loadSummary(), loadUpstream()]);
+  } else if (view === 'customers') {
+    await loadCustomers();
+  } else if (view === 'keys' || view === 'credits') {
+    await Promise.all([loadCustomers(), loadKeys()]);
+  } else if (view === 'prices') {
+    await loadPrices();
+  } else if (view === 'usage') {
+    await loadSummary();
+  } else if (view === 'upstream' || view === 'system') {
+    await loadUpstream();
+  }
 }
 
 async function boot() {
@@ -265,7 +487,7 @@ async function boot() {
     return;
   }
   await guard(async () => {
-    await loadCustomers();
+    await show('dashboard');
     state.authed = true;
     state.error = '';
   });
@@ -293,14 +515,7 @@ mountChrome(async (action, target) => {
     return;
   }
   if (action === 'nav') {
-    state.notice = '';
-    state.error = '';
-    state.view = target.dataset.view || 'customers';
-    await guard(async () => {
-      if (state.view === 'customers') await loadCustomers();
-      if (state.view === 'prices') state.prices = (await client.request('/admin/prices')).data || [];
-      if (state.view === 'usage') state.summary = (await client.request('/admin/usage/summary')).data || [];
-    });
+    await guard(() => show(target.dataset.view || 'dashboard'));
     return;
   }
   if (action === 'open' && target.dataset.id) {
@@ -318,7 +533,8 @@ mountChrome(async (action, target) => {
     if (!window.confirm(t('confirmRevoke'))) return;
     await guard(async () => {
       await client.request(`/admin/keys/${target.dataset.id}/revoke`, { method: 'POST' });
-      if (state.customer?.id) await openCustomer(state.customer.id, true);
+      if (state.view === 'customer' && state.customer?.id) await openCustomer(state.customer.id, true);
+      else await loadKeys();
     });
     return;
   }
@@ -335,13 +551,22 @@ mountChrome(async (action, target) => {
   if (action === 'reset-price' && target.dataset.model) {
     await guard(async () => {
       await client.request(`/admin/prices/${encodeURIComponent(target.dataset.model)}`, { method: 'DELETE' });
-      state.prices = (await client.request('/admin/prices')).data || [];
+      await loadPrices();
     });
     return;
   }
   if (action === 'refresh-usage') {
+    await guard(loadSummary);
+    return;
+  }
+  if (action === 'reset-upstream') {
     await guard(async () => {
-      state.summary = (await client.request('/admin/usage/summary')).data || [];
+      state.upstream = await client.request('/admin/upstream', {
+        method: 'PUT',
+        body: JSON.stringify({ reset: true }),
+      });
+      state.health = await loadHealth();
+      state.notice = t('save');
     });
   }
 });
@@ -355,9 +580,8 @@ app.addEventListener('submit', (event) => {
   if (kind === 'login') {
     client.setToken(String(data.get('token') || '').trim());
     void guard(async () => {
-      await loadCustomers();
+      await show('dashboard');
       state.authed = true;
-      state.view = 'customers';
       state.error = '';
     });
     return;
@@ -388,6 +612,22 @@ app.addEventListener('submit', (event) => {
         }),
       });
       await openCustomer(state.customer.id, true);
+      await loadCustomers();
+    });
+    return;
+  }
+  if (kind === 'credit-any') {
+    const id = String(data.get('customer_id') || '');
+    void guard(async () => {
+      await client.request(`/admin/customers/${id}/credit`, {
+        method: 'POST',
+        body: JSON.stringify({
+          credits: Number(data.get('credits')),
+          note: String(data.get('note') || '') || undefined,
+        }),
+      });
+      await loadCustomers();
+      state.notice = t('addCredit');
     });
     return;
   }
@@ -402,6 +642,19 @@ app.addEventListener('submit', (event) => {
     });
     return;
   }
+  if (kind === 'issue-any') {
+    const id = String(data.get('customer_id') || '');
+    void guard(async () => {
+      const created = await client.request(`/admin/customers/${id}/keys`, {
+        method: 'POST',
+        body: JSON.stringify({ name: String(data.get('name') || '').trim() || 'default' }),
+      });
+      state.revealed = created.key || '';
+      await Promise.all([loadKeys(), loadCustomers()]);
+      state.view = 'keys';
+    });
+    return;
+  }
   if (kind === 'price') {
     void guard(async () => {
       await client.request('/admin/prices', {
@@ -413,8 +666,33 @@ app.addEventListener('submit', (event) => {
           output_micros_per_million: Number(data.get('output')),
         }),
       });
-      state.prices = (await client.request('/admin/prices')).data || [];
+      await loadPrices();
       state.notice = t('save');
+    });
+    return;
+  }
+  if (kind === 'upstream') {
+    const typed = String(data.get('api_key') || '').trim();
+    const clear = data.get('clear_api_key') === 'on';
+    const models = [...form.querySelectorAll('[data-upstream-for]')].map((input) => ({
+      id: input.dataset.upstreamFor,
+      upstream: input.value,
+    }));
+    const payload = {
+      base_url: String(data.get('base_url') || '').trim(),
+      mock: data.get('mock') === 'on',
+      models,
+    };
+    if (clear) payload.clear_api_key = true;
+    else if (typed) payload.api_key = typed;
+    void guard(async () => {
+      state.upstream = await client.request('/admin/upstream', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      state.health = await loadHealth();
+      state.notice = t('applyNow');
+      state.view = 'upstream';
     });
   }
 });

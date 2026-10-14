@@ -1,4 +1,5 @@
 import { generateApiKey, hashApiKey, keyPrefix } from '../auth.js';
+import { parseUpstreamPatch } from '../runtimeSettings.js';
 import { ApiError } from '../errors.js';
 import {
   asObject,
@@ -345,6 +346,32 @@ export function registerAdminRoutes(app: LingxiApp, deps: AppDeps): void {
       offset: page.offset,
     });
     return c.json({ object: 'list', data: events.map((event) => usageJson(event, true)) });
+  });
+
+  app.get('/admin/keys', async (c) => {
+    const page = pageParams(c, 100, 500);
+    const keys = await deps.repo.listAllKeys(deps.db, page.limit, page.offset);
+    return c.json({
+      object: 'list',
+      data: keys.map((key) => ({ ...apiKeyJson(key), customer_name: key.customerName })),
+    });
+  });
+
+  app.get('/admin/upstream', async (c) => {
+    return c.json(await deps.runtime.view());
+  });
+
+  app.put('/admin/upstream', async (c) => {
+    const patch = parseUpstreamPatch(asObject(await readJson(c)));
+    const view = await deps.runtime.save(patch);
+    deps.logger.info('upstream_settings_saved', {
+      mode: view.mode,
+      mock: view.mock,
+      key_set: view.key_set,
+      key_source: view.key_source,
+      base_url_source: view.base_url_source,
+    });
+    return c.json(view);
   });
 
   app.get('/admin/prices', async (c) => {

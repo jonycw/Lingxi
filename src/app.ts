@@ -15,6 +15,7 @@ import { registerPaymentWebhook } from './payments.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerOpenAiRoutes } from './routes/openai.js';
 import { registerConsole } from './routes/ui.js';
+import { createRuntimeSettings, type RuntimeSettings } from './runtimeSettings.js';
 import { createUpstream, type FetchLike, type Upstream } from './upstream.js';
 import type { AppDeps, AppVariables, LingxiApp } from './appTypes.js';
 import { adminAuth, customerAuth } from './auth.js';
@@ -30,12 +31,22 @@ export type CreateAppOptions = {
   fetchImpl?: FetchLike;
   now?: () => Date;
   failLimiter?: ReturnType<typeof createFailLimiter>;
+  runtime?: RuntimeSettings;
 };
 
 function registerHealth(app: LingxiApp, deps: AppDeps): void {
   const handler = async (c: Context<{ Variables: AppVariables }>) => {
     try {
       await deps.db.get('SELECT 1 AS ok');
+      const live = await deps.runtime.effective();
+      return c.json({
+        status: 'ok',
+        service: SERVICE_NAME,
+        version: VERSION,
+        uptime_seconds: Math.round(process.uptime()),
+        database: { status: 'ok', dialect: deps.db.dialect },
+        upstream: live.mode,
+      });
     } catch {
       return c.json(
         {
@@ -48,14 +59,6 @@ function registerHealth(app: LingxiApp, deps: AppDeps): void {
         503,
       );
     }
-    return c.json({
-      status: 'ok',
-      service: SERVICE_NAME,
-      version: VERSION,
-      uptime_seconds: Math.round(process.uptime()),
-      database: { status: 'ok', dialect: deps.db.dialect },
-      upstream: deps.config.upstreamMode,
-    });
   };
   app.get('/health', handler);
   app.get('/healthz', handler);
@@ -68,12 +71,22 @@ export function createApp(options: CreateAppOptions): LingxiApp {
   models.list();
   const now = options.now ?? (() => new Date());
   const logger = options.logger ?? createLogger(config.logLevel, config.secrets);
+  const runtime =
+    options.runtime ??
+    createRuntimeSettings({
+      config,
+      db: options.db,
+      repo,
+      models,
+      now,
+    });
   const upstream =
     options.upstream ??
     createUpstream(config, {
       fetchImpl: options.fetchImpl,
       now,
       logger,
+      resolve: () => runtime.effective(),
     });
   const failLimiter =
     options.failLimiter ?? createFailLimiter(config.authFailLimit, config.authFailWindowMs, () => now().getTime());
@@ -84,6 +97,7 @@ export function createApp(options: CreateAppOptions): LingxiApp {
     logger,
     models,
     upstream,
+    runtime,
     now,
     failLimiter,
   };

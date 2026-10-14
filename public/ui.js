@@ -83,6 +83,41 @@ const STRINGS = {
     noModels: '没有可用模型。',
     unlimited: '不限',
     keyPrefix: '密钥',
+    dashboard: '总览',
+    keys: '密钥',
+    navCredits: '积分',
+    upstream: '上游',
+    system: '系统',
+    newChat: '新对话',
+    chats: '历史对话',
+    baseUrl: '上游地址',
+    upstreamKey: '上游密钥',
+    mockToggle: '模拟模式',
+    saveUpstream: '保存并立即生效',
+    resetUpstream: '恢复为环境变量',
+    keyMissing: '未设置',
+    sourceSettings: '已保存设置',
+    sourceEnv: '环境变量',
+    sourceNone: '未设置',
+    effectiveMode: '当前生效',
+    modelMap: '模型映射',
+    fileUpstream: '文件默认',
+    liveUpstream: '上游模型名',
+    customerName: '客户',
+    emptyChats: '还没有对话',
+    upstreamHint: '环境变量只是启动默认值。保存后写入数据库并立即生效，无需重启。密钥只写不回显，读取时仅显示末四位。',
+    systemHint: '数据文件里会保存上游密钥。请保护 data/ 目录，不要把数据库提交到仓库。',
+    maskedKey: '已设置，末四位',
+    keepKey: '留空表示不修改密钥',
+    clearKey: '清除已保存的密钥',
+    applyNow: '保存后下一通对话即使用新上游。',
+    noKeyHint: '模拟开关已关闭，但没有密钥，对话仍走本地模拟。',
+    dashboardCustomers: '客户数',
+    dashboardKeys: '密钥数',
+    dashboardRequests: '用量行',
+    envBootstrap: '启动时读取 .env。管理台里的上游设置会覆盖它。',
+    deleteChat: '删除',
+    accountShort: '余额与用量',
   },
   en: {
     adminTitle: 'Admin',
@@ -168,6 +203,41 @@ const STRINGS = {
     noModels: 'No models are enabled.',
     unlimited: 'Unlimited',
     keyPrefix: 'Key',
+    dashboard: 'Dashboard',
+    keys: 'Keys',
+    navCredits: 'Credits',
+    upstream: 'Upstream',
+    system: 'System',
+    newChat: 'New chat',
+    chats: 'History',
+    baseUrl: 'Base URL',
+    upstreamKey: 'Upstream key',
+    mockToggle: 'Mock mode',
+    saveUpstream: 'Save and apply',
+    resetUpstream: 'Reset to environment',
+    keyMissing: 'Not set',
+    sourceSettings: 'Saved settings',
+    sourceEnv: 'Environment',
+    sourceNone: 'Not set',
+    effectiveMode: 'Effective',
+    modelMap: 'Model mapping',
+    fileUpstream: 'File default',
+    liveUpstream: 'Upstream model',
+    customerName: 'Customer',
+    emptyChats: 'No chats yet',
+    upstreamHint: 'Environment variables are only the bootstrap defaults. Saving writes to the database and applies immediately, without a restart. The key is write-only and only the last four characters are shown.',
+    systemHint: 'The database stores the upstream key. Protect the data directory and do not commit it.',
+    maskedKey: 'Set, last four',
+    keepKey: 'Leave blank to keep the current key',
+    clearKey: 'Clear the saved key',
+    applyNow: 'The next chat uses the saved upstream.',
+    noKeyHint: 'Mock is off, but no key is set, so chat stays on the local mock.',
+    dashboardCustomers: 'Customers',
+    dashboardKeys: 'Keys',
+    dashboardRequests: 'Usage rows',
+    envBootstrap: 'The process starts from .env. Upstream settings saved here override it.',
+    deleteChat: 'Delete',
+    accountShort: 'Balance and usage',
   },
 };
 
@@ -187,7 +257,7 @@ export function setLang(next) {
 export function theme() {
   const stored = localStorage.getItem('lingxi.theme');
   if (stored === 'light' || stored === 'dark') return stored;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return document.documentElement.getAttribute('data-shell') === 'ide' ? 'dark' : 'light';
 }
 
 export function setTheme(next) {
@@ -284,6 +354,22 @@ export function shell({ title, health, signedIn }) {
       </div>
     </header>
   `;
+}
+
+export function toolbar({ signedIn }) {
+  return `
+    <div class="toolbar">
+      <div class="spacer"></div>
+      <button class="button button-ghost" type="button" data-action="lang">${esc(t('lang'))}</button>
+      <button class="button button-ghost" type="button" data-action="theme">${esc(theme() === 'dark' ? t('themeToLight') : t('themeToDark'))}</button>
+      ${signedIn ? `<button class="button button-ghost" type="button" data-action="logout">${esc(t('signOut'))}</button>` : ''}
+    </div>`;
+}
+
+export function sourceLabel(source) {
+  if (source === 'settings') return t('sourceSettings');
+  if (source === 'env') return t('sourceEnv');
+  return t('sourceNone');
 }
 
 export function banner(error, notice) {
