@@ -10,6 +10,7 @@ import type {
   ModelOverride,
   QuotaPeriod,
   QuotaSnapshot,
+  SkillPack,
   UsageEvent,
   UsageStatus,
 } from '../types.js';
@@ -95,6 +96,17 @@ type QuotaRow = {
   cost_micros: number | string | bigint;
 };
 
+type SkillRow = {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  enabled: number | string | bigint;
+  version: number | string | bigint;
+  created_at: string;
+  updated_at: string;
+};
+
 function num(value: number | string | bigint | null | undefined): number {
   if (typeof value === 'number') {
     return value;
@@ -173,6 +185,19 @@ function mapUsage(row: UsageRow): UsageEvent {
     latencyMs: num(row.latency_ms),
     stream: num(row.stream) === 1,
     createdAt: row.created_at,
+  };
+}
+
+function mapSkill(row: SkillRow): SkillPack {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    body: row.body,
+    enabled: num(row.enabled) === 1,
+    version: num(row.version),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -800,6 +825,59 @@ export function createRepository() {
     },
     async deleteSetting(db: Executor, key: string): Promise<void> {
       await db.run('DELETE FROM app_settings WHERE key = ?', [key]);
+    },
+    async listSkills(db: Executor, enabledOnly: boolean): Promise<SkillPack[]> {
+      const sql = enabledOnly
+        ? 'SELECT * FROM skills WHERE enabled = 1 ORDER BY name ASC, id ASC'
+        : 'SELECT * FROM skills ORDER BY name ASC, id ASC';
+      const rows = await db.all<SkillRow>(sql);
+      return rows.map(mapSkill);
+    },
+    async getSkill(db: Executor, id: string): Promise<SkillPack | null> {
+      const row = await db.get<SkillRow>('SELECT * FROM skills WHERE id = ?', [id]);
+      return row ? mapSkill(row) : null;
+    },
+    async getSkillsByIds(db: Executor, ids: readonly string[]): Promise<SkillPack[]> {
+      if (ids.length === 0) {
+        return [];
+      }
+      const placeholders = ids.map(() => '?').join(', ');
+      const rows = await db.all<SkillRow>(`SELECT * FROM skills WHERE id IN (${placeholders})`, ids);
+      return rows.map(mapSkill);
+    },
+    async createSkill(
+      db: Executor,
+      input: { id: string; name: string; description: string; body: string; enabled: boolean; now: string },
+    ): Promise<SkillPack> {
+      await db.run(
+        `INSERT INTO skills (id, name, description, body, enabled, version, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+        [input.id, input.name, input.description, input.body, input.enabled ? 1 : 0, input.now, input.now],
+      );
+      const created = await this.getSkill(db, input.id);
+      if (!created) {
+        throw new Error('Skill insert failed');
+      }
+      return created;
+    },
+    async updateSkill(
+      db: Executor,
+      input: { id: string; name: string; description: string; body: string; enabled: boolean; now: string },
+    ): Promise<SkillPack | null> {
+      const result = await db.run(
+        `UPDATE skills
+         SET name = ?, description = ?, body = ?, enabled = ?, version = version + 1, updated_at = ?
+         WHERE id = ?`,
+        [input.name, input.description, input.body, input.enabled ? 1 : 0, input.now, input.id],
+      );
+      if (result.changes === 0) {
+        return null;
+      }
+      return this.getSkill(db, input.id);
+    },
+    async deleteSkill(db: Executor, id: string): Promise<boolean> {
+      const result = await db.run('DELETE FROM skills WHERE id = ?', [id]);
+      return result.changes > 0;
     },
     async listAllKeys(
       db: Executor,

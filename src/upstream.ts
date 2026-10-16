@@ -4,6 +4,7 @@ import { ApiError } from './errors.js';
 import type { EffectiveUpstream } from './runtimeSettings.js';
 import type { Logger } from './logger.js';
 import { scrubSecrets } from './redact.js';
+import { stripGatewayExtensions } from './skills.js';
 import {
   estimateMessages,
   estimateTokens,
@@ -22,6 +23,7 @@ export type UpstreamRequest = {
   upstreamModel: string;
   body: Record<string, unknown>;
   messages: unknown;
+  appliedSkillIds?: readonly string[];
 };
 
 export type CompletionResult = {
@@ -80,7 +82,9 @@ function lastUserText(messages: unknown): string {
 
 export function buildMockCompletion(input: UpstreamRequest, now: Date): { json: Record<string, unknown>; usage: TokenUsage; text: string } {
   const echoed = lastUserText(input.messages);
-  const text = echoed ? `（灵犀模拟）已收到：${echoed}` : '（灵犀模拟）上游未配置，这是一条本地模拟回复。';
+  const base = echoed ? `（灵犀模拟）已收到：${echoed}` : '（灵犀模拟）上游未配置，这是一条本地模拟回复。';
+  const applied = input.appliedSkillIds ?? [];
+  const text = applied.length > 0 ? `${base}\n（已应用技能：${applied.join(', ')}）` : base;
   const promptTokens = estimateMessages(input.messages);
   const completionTokens = Math.max(1, estimateTokens(text));
   const usage = {
@@ -380,9 +384,8 @@ export function createUpstream(
 }
 
 export function upstreamRequestBody(raw: Record<string, unknown>, upstreamModel: string, stream: boolean): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...raw, model: upstreamModel };
-  delete next.api_key;
-  delete next.apiKey;
+  const next = stripGatewayExtensions(raw);
+  next.model = upstreamModel;
   if (stream) {
     const existing = next.stream_options;
     const base =

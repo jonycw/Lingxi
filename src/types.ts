@@ -103,6 +103,17 @@ export type QuotaSnapshot = {
   costMicros: number;
 };
 
+export type SkillPack = {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  enabled: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export function formatCredits(micros: number): string {
   if (!Number.isSafeInteger(micros)) {
     return String(micros / MICROS_PER_CREDIT);
@@ -143,5 +154,26 @@ export function apiKeyJson(key: ApiKeyRecord): Record<string, unknown> {
     created_at: key.createdAt,
     revoked_at: key.revokedAt,
     last_used_at: key.lastUsedAt,
+  };
+}
+
+export function usageJson(event: UsageEvent, includeUpstream: boolean): Record<string, unknown> {
+  return {
+    id: event.id,
+    request_id: event.requestId,
+    api_key_id: event.apiKeyId,
+    key_prefix: event.keyPrefix,
+    customer_id: event.customerId,
+    model: event.model,
+    ...(includeUpstream ? { upstream_model: event.upstreamModel } : {}),
+    prompt_tokens: event.promptTokens,
+    completion_tokens: event.completionTokens,
+    total_tokens: event.totalTokens,
+    cost_micros: event.costMicros,
+    status: event.status,
+    error_code: event.errorCode,
+    latency_ms: event.latencyMs,
+    stream: event.stream,
+    created_at: event.createdAt,
   };
 }

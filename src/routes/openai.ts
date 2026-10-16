@@ -4,8 +4,9 @@ import { authorizeChat, listPublicModels, resolveBillableModel, type GateResult 
 import { ApiError } from '../errors.js';
 import { pageParams, readJson } from '../http.js';
 import { periodKeyFor } from '../db/repository.js';
+import { applyChatSkills, listSkillPacks, skillCustomerJson } from '../skills.js';
 import { estimateMessages, estimateTokens, extractDeltaText, zeroUsage } from '../tokens.js';
-import { formatCredits, type TokenUsage, type UsageEvent } from '../types.js';
+import { formatCredits, usageJson, type TokenUsage } from '../types.js';
 import { upstreamRequestBody } from '../upstream.js';
 import type { AppDeps, AppVariables, LingxiApp } from '../appTypes.js';
 
@@ -64,27 +65,6 @@ function parseChat(body: unknown, deps: AppDeps): { model: string; stream: boole
     }
   }
   return { model: raw.model, stream: raw.stream === true, raw };
-}
-
-function usageJson(event: UsageEvent, includeUpstream: boolean): Record<string, unknown> {
-  return {
-    id: event.id,
-    request_id: event.requestId,
-    api_key_id: event.apiKeyId,
-    key_prefix: event.keyPrefix,
-    customer_id: event.customerId,
-    model: event.model,
-    ...(includeUpstream ? { upstream_model: event.upstreamModel } : {}),
-    prompt_tokens: event.promptTokens,
-    completion_tokens: event.completionTokens,
-    total_tokens: event.totalTokens,
-    cost_micros: event.costMicros,
-    status: event.status,
-    error_code: event.errorCode,
-    latency_ms: event.latencyMs,
-    stream: event.stream,
-    created_at: event.createdAt,
-  };
 }
 
 function applyGateHeaders(c: Context<{ Variables: AppVariables }>, gate: GateResult): void {
@@ -184,6 +164,11 @@ export function registerOpenAiRoutes(app: LingxiApp, deps: AppDeps): void {
     });
   });
 
+  app.get('/v1/skills', async (c) => {
+    const skills = await listSkillPacks(deps, true);
+    return c.json({ object: 'list', data: skills.map(skillCustomerJson) });
+  });
+
   app.post('/v1/chat/completions', async (c) => {
     const auth = c.get('auth');
     if (!auth) {
@@ -199,9 +184,17 @@ export function registerOpenAiRoutes(app: LingxiApp, deps: AppDeps): void {
         'model_not_found',
       );
     }
+    const prepared = await applyChatSkills(deps, parsed.raw);
     const gate = await authorizeChat(deps, auth, deps.now());
     const started = Date.now();
-    const body = upstreamRequestBody(parsed.raw, model.upstream, parsed.stream);
+    const body = upstreamRequestBody(
+      { ...parsed.raw, messages: prepared.messages },
+      model.upstream,
+      parsed.stream,
+    );
+    if (prepared.appliedIds.length > 0) {
+      c.header('X-Lingxi-Skills', prepared.appliedIds.join(','));
+    }
     let billed = false;
     const record = async (input: { status: 'ok' | 'error'; usage: TokenUsage; errorCode: string | null; stream: boolean }) => {
       if (billed) {
@@ -240,7 +233,8 @@ export function registerOpenAiRoutes(app: LingxiApp, deps: AppDeps): void {
       publicModel: model.id,
       upstreamModel: model.upstream,
       body,
-      messages: parsed.raw.messages,
+      messages: prepared.messages,
+      appliedSkillIds: prepared.appliedIds,
     };
 
     if (parsed.stream) {
@@ -271,7 +265,7 @@ export function registerOpenAiRoutes(app: LingxiApp, deps: AppDeps): void {
             }
           }
           if (usage.totalTokens === 0) {
-            const promptTokens = estimateMessages(parsed.raw.messages);
+            const promptTokens = estimateMessages(prepared.messages);
             const completionTokens = estimateTokens(content);
             usage = { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
           }
@@ -287,7 +281,7 @@ export function registerOpenAiRoutes(app: LingxiApp, deps: AppDeps): void {
             return;
           }
           if (usage.totalTokens === 0) {
-            const promptTokens = estimateMessages(parsed.raw.messages);
+            const promptTokens = estimateMessages(prepared.messages);
             const completionTokens = estimateTokens(content);
             usage = { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
           }
@@ -313,5 +307,3 @@ export function registerOpenAiRoutes(app: LingxiApp, deps: AppDeps): void {
     }
   });
 }
-
-export { usageJson };

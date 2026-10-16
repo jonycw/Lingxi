@@ -18,7 +18,7 @@ import {
 } from './ui.js';
 
 const client = createClient('lingxi.admin.token');
-const NAV = ['dashboard', 'customers', 'keys', 'credits', 'prices', 'usage', 'upstream', 'system'];
+const NAV = ['dashboard', 'customers', 'keys', 'credits', 'prices', 'usage', 'skills', 'upstream', 'system'];
 const state = {
   health: null,
   authed: false,
@@ -27,6 +27,7 @@ const state = {
   customer: null,
   keys: [],
   prices: [],
+  skills: [],
   summary: [],
   upstream: null,
   revealed: '',
@@ -85,6 +86,7 @@ function body() {
   if (state.view === 'credits') return creditsView();
   if (state.view === 'prices') return pricesView();
   if (state.view === 'usage') return usageView();
+  if (state.view === 'skills') return skillsView();
   if (state.view === 'upstream') return upstreamView();
   return systemView();
 }
@@ -450,6 +452,71 @@ async function loadSummary() {
   state.summary = (await client.request('/admin/usage/summary')).data || [];
 }
 
+function skillsView() {
+  const rows = state.skills
+    .map(
+      (skill) => `<tr>
+        <td><code>${esc(skill.id)}</code></td>
+        <td>${esc(skill.name)}</td>
+        <td>${esc(skill.description)}</td>
+        <td>${skill.enabled ? esc(t('enabled')) : esc(t('disabled'))}</td>
+        <td class="num">${esc(skill.version)}</td>
+        <td>
+          <button class="button button-ghost" type="button" data-action="toggle-skill" data-id="${esc(skill.id)}" data-enabled="${skill.enabled ? '1' : '0'}">${esc(skill.enabled ? t('disable') : t('enable'))}</button>
+          <button class="button button-ghost" type="button" data-action="delete-skill" data-id="${esc(skill.id)}">${esc(t('deleteSkill'))}</button>
+        </td>
+      </tr>`,
+    )
+    .join('');
+  const editors = state.skills
+    .map(
+      (skill) => `<section class="card">
+        <h2><code>${esc(skill.id)}</code></h2>
+        <form data-form="update-skill" data-id="${esc(skill.id)}">
+          <div class="form-row">
+            <label>${esc(t('name'))}<input name="name" required maxlength="80" value="${esc(skill.name)}" /></label>
+            <label>${esc(t('description'))}<input name="description" required maxlength="400" value="${esc(skill.description)}" /></label>
+          </div>
+          <label>${esc(t('skillBody'))}<textarea class="skill-body" name="body" required maxlength="8000">${esc(skill.body)}</textarea></label>
+          <label class="check"><input type="checkbox" name="enabled" ${skill.enabled ? 'checked' : ''} /> ${esc(t('enabled'))}</label>
+          <button class="button" type="submit">${esc(t('save'))}</button>
+        </form>
+      </section>`,
+    )
+    .join('');
+  return `
+    <div class="grid-2">
+      <section class="card">
+        <h2>${esc(t('skills'))}</h2>
+        <p class="muted">${esc(t('skillsHint'))}</p>
+        ${
+          rows
+            ? `<div class="table-wrap"><table>
+                <thead><tr><th>${esc(t('skillId'))}</th><th>${esc(t('name'))}</th><th>${esc(t('description'))}</th><th>${esc(t('status'))}</th><th class="num">${esc(t('version'))}</th><th>${esc(t('actions'))}</th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table></div>`
+            : `<p class="muted">${esc(t('emptySkills'))}</p>`
+        }
+      </section>
+      <section class="card">
+        <h2>${esc(t('createSkill'))}</h2>
+        <form data-form="create-skill">
+          <label>${esc(t('skillId'))}<input name="id" required maxlength="64" pattern="[a-z][a-z0-9-]*" spellcheck="false" placeholder="brief" /></label>
+          <label>${esc(t('name'))}<input name="name" required maxlength="80" /></label>
+          <label>${esc(t('description'))}<input name="description" required maxlength="400" /></label>
+          <label>${esc(t('skillBody'))}<textarea class="skill-body" name="body" required maxlength="8000"></textarea></label>
+          <label class="check"><input type="checkbox" name="enabled" checked /> ${esc(t('enabled'))}</label>
+          <button class="button" type="submit">${esc(t('create'))}</button>
+        </form>
+      </section>
+    </div>
+    ${editors}`;
+}
+
+async function loadSkills() {
+  state.skills = (await client.request('/admin/skills')).data || [];
+}
+
 async function loadUpstream() {
   state.upstream = await client.request('/admin/upstream');
   state.health = await loadHealth();
@@ -475,6 +542,8 @@ async function show(view) {
     await loadPrices();
   } else if (view === 'usage') {
     await loadSummary();
+  } else if (view === 'skills') {
+    await loadSkills();
   } else if (view === 'upstream' || view === 'system') {
     await loadUpstream();
   }
@@ -557,6 +626,22 @@ mountChrome(async (action, target) => {
   }
   if (action === 'refresh-usage') {
     await guard(loadSummary);
+    return;
+  }
+  if (action === 'toggle-skill' && target.dataset.id) {
+    const enable = target.dataset.enabled !== '1';
+    await guard(async () => {
+      await client.request(`/admin/skills/${target.dataset.id}/${enable ? 'enable' : 'disable'}`, { method: 'POST' });
+      await loadSkills();
+    });
+    return;
+  }
+  if (action === 'delete-skill' && target.dataset.id) {
+    if (!window.confirm(t('confirmDeleteSkill'))) return;
+    await guard(async () => {
+      await client.request(`/admin/skills/${target.dataset.id}`, { method: 'DELETE' });
+      await loadSkills();
+    });
     return;
   }
   if (action === 'reset-upstream') {
@@ -668,6 +753,41 @@ app.addEventListener('submit', (event) => {
       });
       await loadPrices();
       state.notice = t('save');
+    });
+    return;
+  }
+  if (kind === 'create-skill') {
+    void guard(async () => {
+      await client.request('/admin/skills', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: String(data.get('id') || '').trim(),
+          name: String(data.get('name') || '').trim(),
+          description: String(data.get('description') || '').trim(),
+          body: String(data.get('body') || '').trim(),
+          enabled: data.get('enabled') === 'on',
+        }),
+      });
+      await loadSkills();
+      state.notice = t('create');
+      state.view = 'skills';
+    });
+    return;
+  }
+  if (kind === 'update-skill' && form.dataset.id) {
+    void guard(async () => {
+      await client.request(`/admin/skills/${form.dataset.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: String(data.get('name') || '').trim(),
+          description: String(data.get('description') || '').trim(),
+          body: String(data.get('body') || '').trim(),
+          enabled: data.get('enabled') === 'on',
+        }),
+      });
+      await loadSkills();
+      state.notice = t('save');
+      state.view = 'skills';
     });
     return;
   }

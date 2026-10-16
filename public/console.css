@@ -298,6 +298,18 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   box-shadow: var(--shadow);
 }
 .composer-box textarea { min-height: 52px; border: 0; background: transparent; padding: 6px; }
+.skill-picks { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 8px; }
+.skill-picks .check {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card-2);
+  color: var(--ink);
+  font-size: 14px;
+}
+.skill-picks .check input { width: 16px; height: 16px; }
+.skill-body { min-height: 160px; }
 .composer-tools { display: flex; gap: 10px; align-items: end; }
 .composer-tools label { margin: 0; flex: 1; }
 .home-hero h1 { font-size: clamp(48px, 8vw, 76px); letter-spacing: 0.08em; font-weight: 520; margin: 12px 0; }
