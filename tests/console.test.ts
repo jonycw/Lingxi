@@ -54,7 +54,13 @@ describe('console', () => {
 
     const script = await ctx.app.request('/console/static/admin.js');
     expect(script.status).toBe(200);
-    expect(await script.text()).not.toContain('dev-admin-token-change-me');
+    const adminSource = await script.text();
+    expect(adminSource).not.toContain('dev-admin-token-change-me');
+    expect(adminSource).toContain("'skills'");
+
+    const chat = await ctx.app.request('/console/static/app.js');
+    expect(chat.status).toBe(200);
+    expect(await chat.text()).toContain('lingxi_skills');
 
     const traversal = await ctx.app.request('/console/static/..%2Fpackage.json');
     expect(traversal.status).toBe(404);

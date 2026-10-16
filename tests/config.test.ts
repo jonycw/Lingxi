@@ -20,6 +20,7 @@ describe('configuration', () => {
     expect(config.upstreamApiKey).toBe('');
     expect(config.port).toBe(8787);
     expect(config.adminToken).toBe('dev-admin-token-change-me');
+    expect(config.skillInjectMaxChars).toBe(12_000);
   });
 
   test('production refuses the example admin token', () => {

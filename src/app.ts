@@ -126,6 +126,7 @@ export function createApp(options: CreateAppOptions): LingxiApp {
           'X-Lingxi-Quota-Limit',
           'X-RateLimit-Limit',
           'X-RateLimit-Remaining',
+          'X-Lingxi-Skills',
           'Retry-After',
         ],
         maxAge: 86_400,

@@ -23,6 +23,8 @@ const state = {
   usage: [],
   models: [],
   model: '',
+  skills: [],
+  selectedSkillIds: [],
   messages: [],
   chats: [],
   activeId: '',
@@ -55,6 +57,7 @@ function snapshot() {
     title,
     messages: state.messages.filter((message) => message.content),
     model: state.model,
+    skillIds: state.selectedSkillIds.slice(),
     updatedAt: new Date().toISOString(),
   };
   const index = state.chats.findIndex((chat) => chat.id === state.activeId);
@@ -184,6 +187,21 @@ function chatPane() {
     <form class="composer-dock" data-form="chat">
       <div class="ide-column composer-box">
         <label>${esc(t('message'))}<textarea name="content" required placeholder="${esc(t('message'))}"></textarea></label>
+        <div class="skill-picks">
+          <span class="muted">${esc(t('skillPicks'))}</span>
+          ${
+            state.skills.length
+              ? state.skills
+                  .map(
+                    (skill) => `<label class="check" title="${esc(skill.description)}">
+                      <input type="checkbox" name="skill" value="${esc(skill.id)}" ${state.selectedSkillIds.includes(skill.id) ? 'checked' : ''} />
+                      ${esc(skill.name)}
+                    </label>`,
+                  )
+                  .join('')
+              : `<span class="muted">${esc(t('noSkills'))}</span>`
+          }
+        </div>
         <div class="composer-tools">
           <label>${esc(t('model'))}
             <select name="model" ${state.models.length ? '' : 'disabled'}>${options}</select>
@@ -194,6 +212,16 @@ function chatPane() {
         ${state.models.length ? '' : `<p class="muted">${esc(t('noModels'))}</p>`}
       </div>
     </form>`;
+}
+
+function knownSkillIds(ids) {
+  const allowed = new Set(state.skills.map((skill) => skill.id));
+  return ids.filter((id) => allowed.has(id));
+}
+
+async function refreshSkills() {
+  state.skills = (await client.request('/v1/skills')).data || [];
+  state.selectedSkillIds = knownSkillIds(state.selectedSkillIds);
 }
 
 async function refreshAccount() {
@@ -231,6 +259,7 @@ async function boot() {
   await guard(async () => {
     state.models = (await client.request('/v1/models')).data || [];
     state.model = state.models[0]?.id || '';
+    await refreshSkills();
     await refreshAccount();
     state.authed = true;
   });
@@ -320,6 +349,7 @@ mountChrome((action, target) => {
     snapshot();
     state.activeId = '';
     state.messages = [];
+    state.selectedSkillIds = [];
     state.view = 'chat';
     state.error = '';
     render();
@@ -331,6 +361,7 @@ mountChrome((action, target) => {
     if (!chat) return;
     state.activeId = chat.id;
     state.messages = (chat.messages || []).map((message) => ({ ...message }));
+    state.selectedSkillIds = knownSkillIds(Array.isArray(chat.skillIds) ? chat.skillIds : []);
     if (chat.model) state.model = chat.model;
     state.view = 'chat';
     render();
@@ -347,6 +378,17 @@ mountChrome((action, target) => {
   }
 });
 
+app.addEventListener('change', (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || input.name !== 'skill') return;
+  const id = input.value;
+  if (input.checked) {
+    if (!state.selectedSkillIds.includes(id)) state.selectedSkillIds.push(id);
+  } else {
+    state.selectedSkillIds = state.selectedSkillIds.filter((item) => item !== id);
+  }
+});
+
 app.addEventListener('submit', (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
@@ -357,6 +399,7 @@ app.addEventListener('submit', (event) => {
     void guard(async () => {
       state.models = (await client.request('/v1/models')).data || [];
       state.model = state.models[0]?.id || '';
+      await refreshSkills();
       await refreshAccount();
       state.authed = true;
       state.view = 'chat';
@@ -367,8 +410,10 @@ app.addEventListener('submit', (event) => {
     const content = String(data.get('content') || '').trim();
     const model = String(data.get('model') || state.model || '');
     const stream = data.get('stream') === 'on';
+    const picked = knownSkillIds([...data.getAll('skill')].map(String));
     if (!content || !model) return;
     state.model = model;
+    state.selectedSkillIds = picked;
     state.messages.push({ role: 'user', content });
     state.messages.push({ role: 'assistant', content: '' });
     state.view = 'chat';
@@ -386,6 +431,7 @@ app.addEventListener('submit', (event) => {
           body: JSON.stringify({
             model,
             stream,
+            ...(picked.length ? { lingxi_skills: picked } : {}),
             messages: state.messages
               .filter((message) => message.role === 'user' || message.content)
               .map((message) => ({ role: message.role, content: message.content })),

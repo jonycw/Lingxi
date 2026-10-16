@@ -1,5 +1,14 @@
 import { generateApiKey, hashApiKey, keyPrefix } from '../auth.js';
 import { parseUpstreamPatch } from '../runtimeSettings.js';
+import {
+  createSkillPack,
+  deleteSkillPack,
+  getSkillPack,
+  listSkillPacks,
+  setSkillEnabled,
+  skillAdminJson,
+  updateSkillPack,
+} from '../skills.js';
 import { ApiError } from '../errors.js';
 import {
   asObject,
@@ -11,8 +20,7 @@ import {
   readJson,
   timeParam,
 } from '../http.js';
-import { usageJson } from './openai.js';
-import { apiKeyJson, customerJson, formatCredits, type ApiKeyRecord, type QuotaPeriod } from '../types.js';
+import { apiKeyJson, customerJson, formatCredits, usageJson, type ApiKeyRecord, type QuotaPeriod } from '../types.js';
 import type { AppDeps, LingxiApp } from '../appTypes.js';
 import type { KeyPatch } from '../db/repository.js';
 
@@ -414,6 +422,41 @@ export function registerAdminRoutes(app: LingxiApp, deps: AppDeps): void {
     });
     const rows = await catalog(deps);
     return c.json(rows.find((row) => row.id === modelId));
+  });
+
+  app.get('/admin/skills', async (c) => {
+    const skills = await listSkillPacks(deps, false);
+    return c.json({ object: 'list', data: skills.map(skillAdminJson) });
+  });
+
+  app.post('/admin/skills', async (c) => {
+    const skill = await createSkillPack(deps, asObject(await readJson(c)));
+    return c.json(skillAdminJson(skill), 201);
+  });
+
+  app.get('/admin/skills/:id', async (c) => {
+    const skill = await getSkillPack(deps, c.req.param('id'));
+    return c.json(skillAdminJson(skill));
+  });
+
+  app.patch('/admin/skills/:id', async (c) => {
+    const skill = await updateSkillPack(deps, c.req.param('id'), asObject(await readJson(c)));
+    return c.json(skillAdminJson(skill));
+  });
+
+  app.post('/admin/skills/:id/enable', async (c) => {
+    const skill = await setSkillEnabled(deps, c.req.param('id'), true);
+    return c.json(skillAdminJson(skill));
+  });
+
+  app.post('/admin/skills/:id/disable', async (c) => {
+    const skill = await setSkillEnabled(deps, c.req.param('id'), false);
+    return c.json(skillAdminJson(skill));
+  });
+
+  app.delete('/admin/skills/:id', async (c) => {
+    await deleteSkillPack(deps, c.req.param('id'));
+    return c.json({ id: c.req.param('id'), deleted: true });
   });
 
   app.delete('/admin/prices/:model', async (c) => {

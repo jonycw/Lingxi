@@ -58,6 +58,7 @@ export function registerConsole(app: LingxiApp): void {
       consoles: { admin: '/admin/ui', customer: '/console' },
       openai: '/v1/chat/completions',
       models: '/v1/models',
+      skills: '/v1/skills',
       account: '/v1/me',
     });
   });

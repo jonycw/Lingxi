@@ -13,6 +13,7 @@ Lingxi（灵犀）是一个私有的 OpenAI 兼容 API 网关。你在一台自�
 - 用量流水、余额账本、模型价格覆盖
 - 上游模型名映射（`config/models.json`）
 - 未配置上游密钥时自动进入本地模拟模式，便于先跑通鉴权与记账
+- 技能包：管理员在数据库里维护说明文字，客户按次选择，网关注入系统提示后再转发上游
 - 管理接口使用 `ADMIN_TOKEN`
 - 可选 HMAC 支付回调，便于以后接支付宝 / 微信支付
 - SQLite 开箱即用，同一套 SQL 可切到 Postgres
@@ -130,11 +131,11 @@ POSTGRES_PASSWORD=change-me docker compose --profile postgres up
 
 管理台别名是 `/console/admin`，对话台别名是 `/app`。
 
-管理台是左侧导航的仓库式界面，分区为总览、客户、密钥、积分、价格、用量、上游、系统。用 `.env` 里的 `ADMIN_TOKEN` 登录。令牌只写入当前标签页的 `sessionStorage`，关闭标签即清除，不会写进仓库。登录后可以新建客户、给余额充值、签发或吊销 `lx_` 密钥、修改模型价格、查看用量汇总。完整客户密钥只在签发成功的当次显示，请立即复制。
+管理台是左侧导航的仓库式界面，分区为总览、客户、密钥、积分、价格、用量、技能、上游、系统。用 `.env` 里的 `ADMIN_TOKEN` 登录。令牌只写入当前标签页的 `sessionStorage`，关闭标签即清除，不会写进仓库。登录后可以新建客户、给余额充值、签发或吊销 `lx_` 密钥、修改模型价格、查看用量汇总。完整客户密钥只在签发成功的当次显示，请立即复制。
 
 上游页可以保存 Cursor 或其它 OpenAI 兼容服务的地址、密钥、模拟开关和模型映射。`.env` 里的 `UPSTREAM_BASE_URL`、`UPSTREAM_API_KEY`、`UPSTREAM_MOCK` 以及 `config/models.json` 只是启动默认值。保存后写入数据库并立刻生效，不用重启进程。读取接口只返回密钥是否已设置和末四位，不会回显完整密钥，日志也不会记下它。留空密钥框表示不修改；勾选「清除已保存的密钥」则退回环境变量。勾选「模拟模式」时对话走本地模拟。关闭模拟且存在密钥时，客户对话会转发到保存的上游。数据库文件会保存该密钥，请保护 `data/`，不要提交。
 
-客户把拿到的 `lx_` 密钥粘贴到对话台。对话台是深色聊天界面：左侧是本机保存的历史对话，底部是输入框和模型选择。它用 `GET /v1/models` 填充模型列表，用 `POST /v1/chat/completions` 发消息，账户页显示 `GET /v1/me` 的余额与配额，以及 `GET /v1/usage` 的最近调用。没有上游密钥时是模拟模式，回复里会包含「灵犀模拟」。
+客户把拿到的 `lx_` 密钥粘贴到对话台。对话台是深色聊天界面：左侧是本机保存的历史对话，底部是输入框和模型选择。它用 `GET /v1/models` 填充模型列表，用 `GET /v1/skills` 列出已启用的技能包，用 `POST /v1/chat/completions` 发消息，账户页显示 `GET /v1/me` 的余额与配额，以及 `GET /v1/usage` 的最近调用。勾选的技能会以 `lingxi_skills` 发给这一次对话。没有上游密钥时是模拟模式，回复里会包含「灵犀模拟」；选了技能时还会带上「已应用技能」。
 
 页面、样式和图标都从 `public/` 由同一进程提供，不请求外部 CDN。浏览器访问 `/` 且 `Accept` 包含 `text/html` 时返回首页；`curl` 或不带该头时仍返回 JSON 索引。右上角可切换中文 / English 和浅色 / 深色。
 
@@ -163,6 +164,7 @@ POSTGRES_PASSWORD=change-me docker compose --profile postgres up
 | `ALLOW_PASSTHROUGH_MODELS` | `true` 时未登记的模型名会原样转发，并使用默认价格 |
 | `PAYMENT_WEBHOOK_SECRET` | 非空时启用 `POST /admin/payments/webhook` |
 | `USAGE_RETENTION_DAYS` | 启动时删除更早的用量。`0` 表示保留 |
+| `SKILL_INJECT_MAX_CHARS` | 一次请求注入技能正文的字符上限，默认 `12000` |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
 
 金额单位是 **micro-credit**：`1` 积分 = `1_000_000` micros。价格是「每 1,000,000 tokens 多少 micros」。示例价格只是占位，不是任何厂商的官方价。
@@ -188,6 +190,7 @@ Authorization: Bearer lx_...
 | `GET` | `/v1/me` | 当前密钥对应的客户余额、密钥前缀和本周期配额。不返回完整密钥 |
 | `POST` | `/v1/chat/completions` | 聊天补全。`stream: true` 为 SSE |
 | `GET` | `/v1/usage` | 当前密钥的余额、配额和最近用量 |
+| `GET` | `/v1/skills` | 已启用的技能包。只有 id、名称、说明和版本，不含正文 |
 
 成功的非流式响应会带上：
 
@@ -225,6 +228,13 @@ Authorization: Bearer lx_...
 | `PUT` | `/admin/prices` | 覆盖价格或 `enabled`。字段传 `null` 表示恢复文件默认 |
 | `DELETE` | `/admin/prices/:model` | 删除覆盖 |
 | `POST` | `/admin/payments/webhook` | 仅在配置了 `PAYMENT_WEBHOOK_SECRET` 时存在。不使用管理员令牌 |
+| `GET` | `/admin/skills` | 全部技能包，含正文和停用项 |
+| `POST` | `/admin/skills` | 创建。`{ "id", "name", "description", "body", "enabled?" }`。`id` 是小写 slug |
+| `GET` | `/admin/skills/:id` | 一个技能包 |
+| `PATCH` | `/admin/skills/:id` | 修改名称、说明、正文或 `enabled`。`id` 不可改 |
+| `POST` | `/admin/skills/:id/enable` | 启用 |
+| `POST` | `/admin/skills/:id/disable` | 停用 |
+| `DELETE` | `/admin/skills/:id` | 删除 |
 
 签发密钥的默认限额：每分钟 60 次请求、每分钟 100000 tokens、配额周期为自然月（UTC）、不设软/硬配额。
 
@@ -307,6 +317,41 @@ SQLite 与 Postgres 共用 `src/db/schema.ts`。驱动选择只看 `DATABASE_URL
 - `NODE_ENV=production` 时拒绝 `.env.example` 里的管理员令牌。
 - CORS 默认由环境变量控制。示例文件为了本地调试使用 `*`，对外部署请改成明确的源或留空。
 
+## 技能包
+
+技能包是给客户对话用的说明，存在数据库里，管理员可以增删改、启用或停用，不用重新部署。这和仓库里的 agent skills 不是一回事：`.agents/skills/` 只给维护这个代码库的编程代理看，不会发给上游，也不会出现在客户的 `/v1/skills` 里。
+
+创建一个技能包（正文不要写管理员令牌或上游密钥）：
+
+```bash
+curl -s http://127.0.0.1:8787/admin/skills \
+  -H "Authorization: Bearer dev-admin-token-change-me" \
+  -H "Content-Type: application/json" \
+  -d "{\"id\":\"brief\",\"name\":\"简短\",\"description\":\"回答尽量短\",\"body\":\"用一两句话回答。\",\"enabled\":true}"
+```
+
+客户用 `lx_` 密钥列出已启用的包。响应没有正文：
+
+```bash
+curl -s http://127.0.0.1:8787/v1/skills \
+  -H "Authorization: Bearer lx_替换成刚签发的密钥"
+```
+
+调用聊天时带上可选字段 `lingxi_skills`，值为技能 id 数组。网关按顺序把已启用包的正文合成一段系统说明，放进已有的 `system` 或 `developer` 消息前面；如果第一条不是这两种角色，就插入一条 `system` 消息。然后删掉 `lingxi_skills`，以及 `metadata.skills`，再转发给上游。其它 `metadata` 字段会保留。
+
+`lingxi_skills` 优先于 `metadata.skills`。只在没有 `lingxi_skills` 时才读取 `metadata.skills`。空数组表示这次不用技能。重复 id 会去重。未知或已停用的 id 返回 400（`skill_not_found` 或 `skill_disabled`），不会请求上游。一次最多 8 个。注入文本超过 `SKILL_INJECT_MAX_CHARS`（默认 12000）时返回 `skill_prompt_too_long`。单个正文最多 8000 字。
+
+```bash
+curl -s http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer lx_替换成刚签发的密钥" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"lingxi-fast\",\"lingxi_skills\":[\"brief\"],\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}]}"
+```
+
+成功时响应带 `X-Lingxi-Skills`，值为本次用到的 id。模拟模式的回复仍以「灵犀模拟」开头，并追加「已应用技能」。注入的文字算进提示 token。
+
+对话台 `/console` 在输入框上方列出已启用技能，勾选后随该条消息发送，并记在本机的历史对话里。管理台「技能」页可以编辑正文。
+
 ## 开发
 
 ```bash
@@ -327,12 +372,14 @@ src/auth.ts            客户密钥与管理员令牌
 src/billing.ts         准入：余额、配额、速率
 src/billingCost.ts     整数计价
 src/upstream.ts        上游代理与本地模拟
+src/skills.ts          技能包：校验、注入、转发前去掉网关字段
 src/runtimeSettings.ts 上游设置：环境变量为默认，数据库覆盖并立即生效
 src/payments.ts        HMAC 支付回调
 src/routes/ui.ts       首页、管理台、对话台
 src/db/                SQLite、Postgres 和共用 SQL
 config/models.json     公开模型名到上游模型名
 public/                控制台页面、样式和脚本
+.agents/skills/        给维护者用的 agent skills，不是产品技能包
 ```
 
 ## English
@@ -372,7 +419,7 @@ Change `ADMIN_TOKEN` before exposing the port. Production mode refuses the examp
 - Admin: http://127.0.0.1:8787/admin/ui (`ADMIN_TOKEN`, kept in `sessionStorage` for this tab only)
 - Customer chat: http://127.0.0.1:8787/console (paste an `lx_` key)
 
-Aliases: `/console/admin` and `/app`. The admin console is a sidebar warehouse layout (Dashboard, Customers, Keys, Credits, Prices, Usage, Upstream, System). The customer console is a dark chat workspace with a history sidebar and a bottom composer. The same Node process serves `public/` with no CDN. `GET /` returns HTML when `Accept` includes `text/html`, and a JSON index otherwise. `GET /v1/me` returns the current key's balance and quota without the secret. With no upstream key, the chat console talks to the mock upstream.
+Aliases: `/console/admin` and `/app`. The admin console is a sidebar warehouse layout (Dashboard, Customers, Keys, Credits, Prices, Usage, Skills, Upstream, System). The customer console is a dark chat workspace with a history sidebar and a bottom composer. The composer lists enabled skill packs and sends the checked ids as `lingxi_skills`. The same Node process serves `public/` with no CDN. `GET /` returns HTML when `Accept` includes `text/html`, and a JSON index otherwise. `GET /v1/me` returns the current key's balance and quota without the secret. With no upstream key, the chat console talks to the mock upstream. Mock replies still contain `灵犀模拟`, and append `已应用技能` when a pack was applied.
 
 ### Issue a key and call the API
 
@@ -394,6 +441,29 @@ curl -s http://127.0.0.1:8787/v1/chat/completions \
 ```
 
 The plaintext `lx_` key is returned once. Later admin reads show only a prefix. Revoke with `POST /admin/keys/:id/revoke`.
+
+### Skill packs
+
+A skill pack is instructions for a customer chat, stored in the database so an admin can change it without a redeploy. Agent skills under `.agents/skills/` are different: they tell coding agents how to work in this repository. They are not forwarded upstream and they do not appear in `GET /v1/skills`.
+
+Create one with the admin token. Do not put the admin token or the upstream key in `body`:
+
+```bash
+curl -s http://127.0.0.1:8787/admin/skills \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"brief","name":"Brief","description":"Short answers","body":"Answer in one or two sentences.","enabled":true}'
+```
+
+`id` is a lowercase slug, up to 64 characters. `GET /admin/skills` returns every pack, including disabled ones and the markdown body. `PATCH /admin/skills/:id` updates `name`, `description`, `body`, or `enabled`. `POST /admin/skills/:id/enable` and `/disable` toggle it. `DELETE /admin/skills/:id` removes it.
+
+Customers list enabled packs with `GET /v1/skills` and an `lx_` key. That list has id, name, description, version, and `updated_at`. It does not include the body.
+
+On `POST /v1/chat/completions`, pass optional `lingxi_skills: ["brief"]`. If that field is omitted, `metadata.skills` is used instead. When both are present, `lingxi_skills` wins, including when it is an empty array. Duplicate ids are collapsed. Unknown ids return `400 skill_not_found`. Disabled ids return `400 skill_disabled`. More than 8 ids returns `400 too_many_skills`.
+
+The gateway builds one preface from the selected bodies, in order, and prepends it to an existing `system` or `developer` message. If the first message is neither, it inserts a `system` message. `lingxi_skills`, any other `lingxi_*` field, and `metadata.skills` are removed before the upstream request. Other metadata keys stay. The injected text counts as prompt tokens. If the preface is longer than `SKILL_INJECT_MAX_CHARS` (default 12000), the call returns `400 skill_prompt_too_long` and the upstream is not contacted. A stored body is limited to 8000 characters.
+
+A successful response includes `X-Lingxi-Skills` with the applied ids. In the console, check the packs above the composer; the choice is stored with that chat in the browser.
 
 ### Billing
 

@@ -31,6 +31,7 @@ export type AppConfig = {
   authFailWindowMs: number;
   usageRetentionDays: number;
   trustProxy: boolean;
+  skillInjectMaxChars: number;
   secrets: string[];
 };
 
@@ -145,6 +146,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     authFailWindowMs: 60_000,
     usageRetentionDays: intEnv(env, 'USAGE_RETENTION_DAYS', 0, 0, 3650),
     trustProxy: boolEnv(env, 'TRUST_PROXY', false),
+    skillInjectMaxChars: intEnv(env, 'SKILL_INJECT_MAX_CHARS', 12_000, 256, 200_000),
     secrets,
   };
 }
